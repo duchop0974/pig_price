@@ -1,4 +1,4 @@
-"""CLI lấy giá heo hơi từ nhiều nguồn để so sánh, lưu ra CSV."""
+"""CLI lấy giá heo hơi từ nhiều nguồn để so sánh, lưu vào SQLite."""
 import argparse
 import sys
 from datetime import datetime
@@ -80,6 +80,15 @@ def run_legacy(source: str, mode: str, url: str | None, output: Path, limit: int
     src.save_records(all_records, output)
 
 
+def run_export(db_path: Path, xlsx_path: Path) -> None:
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        n = src.export_to_excel(db_path, xlsx_path)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(f"Đã xuất {n} dòng ra {xlsx_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Lấy dữ liệu giá heo hơi.")
     parser.add_argument(
@@ -90,18 +99,24 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["today", "date", "latest", "backfill", "url"],
+        choices=["today", "date", "latest", "backfill", "url", "export"],
         default="today",
         help=(
             "today: giá mới nhất + bảng so sánh (mặc định); "
             "date: giá đúng ngày --date + bảng so sánh; "
+            "export: xuất toàn bộ dữ liệu ra file Excel; "
             "latest/backfill/url: chế độ nâng cao, không in bảng so sánh"
         ),
     )
     parser.add_argument("--date", help="Ngày cần lấy, định dạng dd/mm/yyyy (dùng với --mode date)")
     parser.add_argument("--url", help="URL bài viết cụ thể (dùng với --mode url)")
     parser.add_argument(
-        "--output", default="data/gia_heo_hoi.csv", help="Đường dẫn file CSV đầu ra"
+        "--output", default="data/gia_heo_hoi.db", help="Đường dẫn file dữ liệu SQLite"
+    )
+    parser.add_argument(
+        "--export-file",
+        default=None,
+        help="Đường dẫn file Excel xuất ra (dùng với --mode export, mặc định data/gia_heo_hoi_YYYYMMDD.xlsx)",
     )
     parser.add_argument(
         "--limit", type=int, default=20, help="Số bài tối đa khi --mode backfill"
@@ -120,6 +135,9 @@ def main():
         except ValueError:
             sys.exit(f"Ngày không hợp lệ: {args.date}. Dùng định dạng dd/mm/yyyy, vd 30/07/2026")
         run_date(args.source, args.date, output)
+    elif args.mode == "export":
+        xlsx_path = Path(args.export_file) if args.export_file else Path(f"data/gia_heo_hoi_{datetime.now():%Y%m%d}.xlsx")
+        run_export(output, xlsx_path)
     else:
         run_legacy(args.source, args.mode, args.url, output, args.limit)
 

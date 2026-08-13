@@ -14,17 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 import pig_sources as src  # noqa: E402
 
-CSV_PATH = BASE_DIR / "data" / "gia_heo_hoi.csv"
-CSV_COLUMNS = [
-    "date",
-    "source",
-    "region",
-    "province",
-    "price_vnd_per_kg",
-    "change_vnd_per_kg",
-    "benchmark_price_vnd_per_kg",
-    "source_url",
-]
+DB_PATH = BASE_DIR / "data" / "gia_heo_hoi.db"
 
 PASSWORD_FILE = Path(__file__).resolve().parent / "password.txt"
 ACCESS_LOG_PATH = Path(__file__).resolve().parent / "access.log"
@@ -45,7 +35,7 @@ app.secret_key = secrets.token_hex(32)
 # Cloudflare Tunnel gửi IP thật của khách qua header X-Forwarded-For; nếu
 # không có ProxyFix thì request.remote_addr luôn chỉ thấy 127.0.0.1.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-csv_lock = threading.Lock()
+db_lock = threading.Lock()
 
 _refresh_state = {"last_run": None}
 REFRESH_COOLDOWN = timedelta(minutes=1)
@@ -95,15 +85,13 @@ def logout():
 
 
 def load_df() -> pd.DataFrame:
-    with csv_lock:
-        if not CSV_PATH.exists():
-            return pd.DataFrame(columns=CSV_COLUMNS)
-        return pd.read_csv(CSV_PATH)
+    with db_lock:
+        return src.load_records_df(DB_PATH)
 
 
 def save_records_locked(records: list[dict]) -> None:
-    with csv_lock:
-        src.save_records(records, CSV_PATH)
+    with db_lock:
+        src.save_records(records, DB_PATH)
 
 
 def latest_date_in(df: pd.DataFrame) -> str | None:
@@ -257,43 +245,14 @@ def api_history():
     return jsonify({"points": points, "source_order": src.SOURCE_ORDER})
 
 
-EXPORT_COLUMNS = {
-    "date": "Ngày",
-    "source": "Nguồn",
-    "region": "Miền",
-    "province": "Địa phương",
-    "price_vnd_per_kg": "Giá (đ/kg)",
-    "change_vnd_per_kg": "Biến động (đ/kg)",
-    "benchmark_price_vnd_per_kg": "Giá heo cám GreenFeed (đ/kg)",
-    "source_url": "Nguồn URL",
-}
-
-
 @app.route("/api/export.xlsx")
 def export_excel():
-    df = load_df()
-    if df.empty:
-        return jsonify({"error": "Chưa có dữ liệu để xuất."}), 404
-
-    export_df = df.copy()
-    export_df["_date_sort"] = pd.to_datetime(export_df["date"], format="%d/%m/%Y")
-    export_df = export_df.sort_values(["_date_sort", "source", "province"]).drop(columns="_date_sort")
-    export_df = export_df.rename(columns=EXPORT_COLUMNS)
-
     buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        export_df.to_excel(writer, index=False, sheet_name="Gia heo hoi")
-        ws = writer.sheets["Gia heo hoi"]
-        for col_idx, col_name in enumerate(export_df.columns, start=1):
-            max_len = max(
-                len(str(col_name)),
-                int(export_df.iloc[:, col_idx - 1].fillna("").astype(str).str.len().max())
-                if len(export_df)
-                else 0,
-            )
-            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 45)
-        ws.freeze_panes = "A2"
-
+    with db_lock:
+        try:
+            src.export_to_excel(DB_PATH, buffer)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 404
     buffer.seek(0)
     filename = f"gia_heo_hoi_{datetime.now():%Y%m%d}.xlsx"
     return send_file(

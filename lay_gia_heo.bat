@@ -26,14 +26,14 @@ if errorlevel 1 (
 cls
 echo ============================================
 echo   GIA HEO HOI - so sanh nhieu nguon
-echo   (nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn)
+echo   (nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn, vinanet.vn)
 echo ============================================
 echo.
 echo   1. Xem gia hom nay (so sanh cac nguon)
 echo   2. Xem gia theo ngay cu the
 echo   3. Lay du lieu gan day (backfill) - tat ca nguon
 echo   4. Lay 1 bai viet theo URL (nongnghiepmoitruong/vietnambiz)
-echo   5. Mo file du lieu CSV
+echo   5. Xuat du lieu ra Excel
 echo   6. Khoi dong web server (xem tren dien thoai/trinh duyet)
 echo   7. Khoi dong LAI web server (sau khi doi mat khau, sua code...)
 echo   8. DUNG web server
@@ -86,12 +86,17 @@ pause
 goto menu
 
 :openfile
-if exist "data\gia_heo_hoi.csv" (
-    start "" "data\gia_heo_hoi.csv"
-) else (
-    echo Chua co file du lieu. Hay lay du lieu truoc.
+if not exist "data\gia_heo_hoi.db" (
+    echo Chua co du lieu. Hay lay du lieu truoc.
     pause
+    goto menu
 )
+python pig_price_scraper.py --mode export
+for /f "delims=" %%f in ('dir /b /o-d "data\gia_heo_hoi_*.xlsx" 2^>nul') do (
+    start "" "data\%%f"
+    goto menu
+)
+pause
 goto menu
 
 :webserver

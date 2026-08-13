@@ -1,5 +1,6 @@
 """Logic lấy & chuẩn hoá giá heo hơi từ nhiều nguồn, dùng chung cho CLI và web app."""
 import re
+import sqlite3
 import sys
 import unicodedata
 from pathlib import Path
@@ -611,27 +612,138 @@ def fetch_by_date_all(target_date: str, sources: list[str] | None = None) -> lis
     return records
 
 
-def save_records(records: list[dict], output_path: Path) -> pd.DataFrame | None:
-    new_df = pd.DataFrame(records)
-    if new_df.empty:
+DB_COLUMNS = [
+    "date",
+    "source",
+    "region",
+    "province",
+    "price_vnd_per_kg",
+    "change_vnd_per_kg",
+    "benchmark_price_vnd_per_kg",
+    "source_url",
+]
+
+_DB_SCHEMA = """
+CREATE TABLE IF NOT EXISTS prices (
+    date TEXT NOT NULL,
+    source TEXT NOT NULL,
+    region TEXT,
+    province TEXT NOT NULL,
+    price_vnd_per_kg INTEGER,
+    change_vnd_per_kg INTEGER,
+    benchmark_price_vnd_per_kg INTEGER,
+    source_url TEXT,
+    PRIMARY KEY (date, source, province)
+);
+CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date);
+CREATE INDEX IF NOT EXISTS idx_prices_source ON prices(source);
+CREATE INDEX IF NOT EXISTS idx_prices_province ON prices(province);
+"""
+
+
+def get_connection(db_path: Path) -> sqlite3.Connection:
+    """Mở kết nối SQLite, tạo bảng/index nếu chưa có. WAL giúp đọc và ghi
+    không chặn lẫn nhau khi nhiều tiến trình (server + script CLI) cùng
+    dùng chung 1 file .db."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.executescript(_DB_SCHEMA)
+    return conn
+
+
+def save_records(records: list[dict], db_path: Path) -> None:
+    if not records:
         print("Không có dữ liệu mới để lưu.")
-        return None
+        return
 
-    if output_path.exists():
-        old_df = pd.read_csv(output_path)
-        combined = pd.concat([old_df, new_df], ignore_index=True)
-    else:
-        combined = new_df
+    rows = [
+        (
+            r["date"],
+            r["source"],
+            r.get("region"),
+            r["province"],
+            r.get("price_vnd_per_kg"),
+            r.get("change_vnd_per_kg"),
+            r.get("benchmark_price_vnd_per_kg"),
+            r.get("source_url"),
+        )
+        for r in records
+    ]
 
-    combined["_date_sort"] = pd.to_datetime(combined["date"], format="%d/%m/%Y")
-    combined = combined.sort_values(["_date_sort", "source", "region", "province"])
-    combined = combined.drop_duplicates(subset=["date", "source", "province"], keep="last")
-    combined = combined.drop(columns="_date_sort")
+    conn = get_connection(db_path)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO prices (date, source, region, province, price_vnd_per_kg,
+                                 change_vnd_per_kg, benchmark_price_vnd_per_kg, source_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date, source, province) DO UPDATE SET
+                region=excluded.region,
+                price_vnd_per_kg=excluded.price_vnd_per_kg,
+                change_vnd_per_kg=excluded.change_vnd_per_kg,
+                benchmark_price_vnd_per_kg=excluded.benchmark_price_vnd_per_kg,
+                source_url=excluded.source_url
+            """,
+            rows,
+        )
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0]
+    finally:
+        conn.close()
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(output_path, index=False, encoding="utf-8-sig")
-    print(f"Đã lưu {len(new_df)} dòng mới, tổng {len(combined)} dòng vào {output_path}")
-    return combined
+    print(f"Đã lưu {len(records)} dòng mới, tổng {total} dòng vào {db_path}")
+
+
+def load_records_df(db_path: Path) -> pd.DataFrame:
+    if not db_path.exists():
+        return pd.DataFrame(columns=DB_COLUMNS)
+    conn = get_connection(db_path)
+    try:
+        return pd.read_sql_query(f"SELECT {', '.join(DB_COLUMNS)} FROM prices", conn)
+    finally:
+        conn.close()
+
+
+EXPORT_COLUMNS = {
+    "date": "Ngày",
+    "source": "Nguồn",
+    "region": "Miền",
+    "province": "Địa phương",
+    "price_vnd_per_kg": "Giá (đ/kg)",
+    "change_vnd_per_kg": "Biến động (đ/kg)",
+    "benchmark_price_vnd_per_kg": "Giá heo cám GreenFeed (đ/kg)",
+    "source_url": "Nguồn URL",
+}
+
+
+def export_to_excel(db_path: Path, dest) -> int:
+    """Xuất toàn bộ dữ liệu ra Excel. `dest` có thể là đường dẫn file hoặc
+    buffer (BytesIO, dùng khi trả file trực tiếp qua web). Trả về số dòng
+    đã xuất."""
+    df = load_records_df(db_path)
+    if df.empty:
+        raise ValueError("Chưa có dữ liệu để xuất.")
+
+    export_df = df.copy()
+    export_df["_date_sort"] = pd.to_datetime(export_df["date"], format="%d/%m/%Y")
+    export_df = export_df.sort_values(["_date_sort", "source", "province"]).drop(columns="_date_sort")
+    export_df = export_df.rename(columns=EXPORT_COLUMNS)
+
+    with pd.ExcelWriter(dest, engine="openpyxl") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Gia heo hoi")
+        ws = writer.sheets["Gia heo hoi"]
+        for col_idx, col_name in enumerate(export_df.columns, start=1):
+            max_len = max(
+                len(str(col_name)),
+                int(export_df.iloc[:, col_idx - 1].fillna("").astype(str).str.len().max())
+                if len(export_df)
+                else 0,
+            )
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 45)
+        ws.freeze_panes = "A2"
+
+    return len(export_df)
 
 
 def build_comparison_table(records: list[dict]) -> pd.DataFrame:

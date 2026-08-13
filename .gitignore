@@ -3,3 +3,6 @@ __pycache__/
 webapp/password.txt
 webapp/server.log
 webapp/access.log
+data/*.db-wal
+data/*.db-shm
+data/gia_heo_hoi_*.xlsx
