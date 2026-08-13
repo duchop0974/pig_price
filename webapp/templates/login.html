@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đăng nhập - Giá heo hơi</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="app-header">
+  <h1>🐷 Giá heo hơi</h1>
+  <p class="sub">Nhập mật khẩu để xem giá</p>
+</header>
+<main>
+  <section class="card">
+    <form method="post">
+      <div class="control-row">
+        <label for="password">Mật khẩu</label>
+        <input type="password" id="password" name="password" autofocus>
+      </div>
+      {% if error %}<p class="msg error">{{ error }}</p>{% endif %}
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">Đăng nhập</button>
+      </div>
+    </form>
+  </section>
+</main>
+<footer>
+  <p>Người phát triển: Nguyễn Đức Hợp</p>
+</footer>
+</body>
+</html>

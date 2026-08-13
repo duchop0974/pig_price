@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giá heo hơi</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+<header class="app-header">
+  <h1>🐷 Giá heo hơi</h1>
+  <p class="sub">So sánh giá heo hơi giữa các nguồn</p>
+</header>
+
+<main>
+  <section class="controls card">
+    <div class="control-row buttons">
+      <button id="btn-today" class="btn btn-primary">🔄 Lấy giá hôm nay</button>
+    </div>
+    <div class="control-row">
+      <label for="date-picker">Chọn ngày</label>
+      <input type="date" id="date-picker">
+      <button id="btn-bydate" class="btn">📅 Lấy giá theo ngày</button>
+    </div>
+    <div class="control-row buttons">
+      <a id="btn-export" class="btn" href="/api/export.xlsx">⬇️ Xuất Excel</a>
+    </div>
+    <p id="refresh-msg" class="msg"></p>
+  </section>
+
+  <section id="sources-updated" class="card sources-updated"></section>
+
+  <section class="card table-wrap">
+    <div id="table-status" class="msg">Đang tải dữ liệu...</div>
+    <div class="table-scroll">
+      <table id="price-table">
+        <thead><tr id="table-head"></tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card chart-section">
+    <h2>Xu hướng giá</h2>
+    <div class="control-row">
+      <label for="province-select">Tỉnh/thành</label>
+      <select id="province-select"></select>
+      <label for="days-select">Khoảng thời gian</label>
+      <select id="days-select">
+        <option value="30">30 ngày</option>
+        <option value="90" selected>90 ngày</option>
+        <option value="365">1 năm</option>
+      </select>
+    </div>
+    <canvas id="price-chart" height="220"></canvas>
+  </section>
+</main>
+
+<footer>
+  <p>Nguồn: nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn, vinanet.vn</p>
+  <p>Người phát triển: Nguyễn Đức Hợp</p>
+  <form method="post" action="{{ url_for('logout') }}">
+    <button type="submit" class="btn">Đăng xuất</button>
+  </form>
+</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
