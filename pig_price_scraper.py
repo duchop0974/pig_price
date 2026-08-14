@@ -5,7 +5,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-import pig_sources as src
+from core.repositories.prices_repo import save_records
+from core.scrapers.registry import SCRAPERS, SOURCE_LABELS, SOURCES, fetch_by_date_all, fetch_latest_all
+from core.services.export_service import export_to_excel
+from core.services.price_service import build_comparison_table, dates_by_source
 
 if sys.stdout.encoding is None or sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -17,15 +20,16 @@ def print_comparison_table(records: list[dict]) -> None:
         print("Không có dữ liệu để so sánh.")
         return
 
-    dates = src.dates_by_source(records)
+    dates = dates_by_source(records)
     print("\nNgày cập nhật theo từng nguồn:")
-    for source_label in src.SOURCE_ORDER:
+    for source_key in SOURCES:
+        source_label = SOURCE_LABELS[source_key]
         if source_label in dates:
             print(f"  - {source_label}: {dates[source_label]}")
         else:
             print(f"  - {source_label}: (không có dữ liệu)")
 
-    table = src.build_comparison_table(records)
+    table = build_comparison_table(records)
     print("\nSo sánh giá heo hơi (đ/kg):")
     if table.empty:
         print("(không có dữ liệu)")
@@ -35,54 +39,43 @@ def print_comparison_table(records: list[dict]) -> None:
 
 
 def run_today(source: str, output: Path) -> None:
-    sources = src.SOURCES if source == "all" else [source]
-    records = src.fetch_latest_all(sources)
-    src.save_records(records, output)
+    sources = SOURCES if source == "all" else [source]
+    records = fetch_latest_all(sources)
+    save_records(records, output)
     print_comparison_table(records)
 
 
 def run_date(source: str, target_date: str, output: Path) -> None:
-    sources = src.SOURCES if source == "all" else [source]
-    records = src.fetch_by_date_all(target_date, sources)
-    src.save_records(records, output)
+    sources = SOURCES if source == "all" else [source]
+    records = fetch_by_date_all(target_date, sources)
+    save_records(records, output)
     print_comparison_table(records)
 
 
 def run_legacy(source: str, mode: str, url: str | None, output: Path, limit: int) -> None:
-    sources = src.SOURCES if source == "all" else [source]
+    sources = SOURCES if source == "all" else [source]
 
     if url and (mode != "url" or len(sources) != 1):
         sys.exit("--url chỉ dùng được với --mode url và một --source cụ thể.")
 
     all_records = []
     for s in sources:
+        scraper = SCRAPERS[s]
         if mode == "url":
-            if s == "nongnghiepmoitruong":
-                all_records.extend(src.nnmt_fetch_url(url))
-            elif s == "vietnambiz":
-                all_records.extend(src.vnb_fetch_url(url))
-            elif s == "vinanet":
-                all_records.extend(src.vnn_fetch_url(url))
-            elif s == "baovanhoa":
-                all_records.extend(src.bvh_fetch_url(url))
+            if hasattr(scraper, "fetch_url"):
+                all_records.extend(scraper.fetch_url(url))
             else:
-                print(f"[{src.SOURCE_LABELS[s]}] Nguồn này không hỗ trợ --mode url, bỏ qua.")
+                print(f"[{SOURCE_LABELS[s]}] Nguồn này không hỗ trợ --mode url, bỏ qua.")
         elif mode == "latest":
-            all_records.extend(src.fetch_latest_all([s]))
+            all_records.extend(fetch_latest_all([s]))
         elif mode == "backfill":
-            if s == "nongnghiepmoitruong":
-                all_records.extend(src.nnmt_fetch_backfill(limit))
-            elif s == "vietnambiz":
-                all_records.extend(src.vnb_fetch_backfill(limit))
-            elif s == "vinanet":
-                all_records.extend(src.vnn_fetch_backfill(limit))
-            elif s == "baovanhoa":
-                all_records.extend(src.bvh_fetch_backfill(limit))
+            if hasattr(scraper, "fetch_backfill"):
+                all_records.extend(scraper.fetch_backfill(limit))
             else:
-                print(f"[{src.SOURCE_LABELS[s]}] Nguồn này chỉ có dữ liệu mới nhất, không backfill được.")
-                all_records.extend(src.fetch_latest_all([s]))
+                print(f"[{SOURCE_LABELS[s]}] Nguồn này chỉ có dữ liệu mới nhất, không backfill được.")
+                all_records.extend(fetch_latest_all([s]))
 
-    src.save_records(all_records, output)
+    save_records(all_records, output)
 
 
 def run_deep_backfill(source: str, days: int, output: Path) -> None:
@@ -90,32 +83,33 @@ def run_deep_backfill(source: str, days: int, output: Path) -> None:
     dò qua sitemap của từng trang (nnmt/vinanet/baovanhoa) hoặc nhiều trang
     danh mục hơn (vietnambiz), thay vì chỉ đọc đúng trang danh sách/danh mục
     hiện tại (vốn chỉ hiện vài bài gần nhất)."""
-    sources = src.SOURCES if source == "all" else [source]
+    sources = SOURCES if source == "all" else [source]
     months = max(1, math.ceil(days / 30))
     pages = max(1, min(10, math.ceil(days / 8)))
 
     all_records = []
     for s in sources:
+        scraper = SCRAPERS[s]
         if s == "nongnghiepmoitruong":
-            rows = src.nnmt_fetch_sitemap_backfill(months_back=months)
+            rows = scraper.fetch_sitemap_backfill(months_back=months)
         elif s == "vinanet":
-            rows = src.vnn_fetch_sitemap_backfill(months_back=months)
+            rows = scraper.fetch_sitemap_backfill(months_back=months)
         elif s == "baovanhoa":
-            rows = src.bvh_fetch_sitemap_backfill(days_back=days)
+            rows = scraper.fetch_sitemap_backfill(days_back=days)
         elif s == "vietnambiz":
-            rows = src.vnb_fetch_deep_backfill(pages=pages)
+            rows = scraper.fetch_deep_backfill(pages=pages)
         else:
-            print(f"[{src.SOURCE_LABELS[s]}] Nguồn này không hỗ trợ lấy sâu, bỏ qua.")
+            print(f"[{SOURCE_LABELS[s]}] Nguồn này không hỗ trợ lấy sâu, bỏ qua.")
             rows = []
         all_records.extend(rows)
 
-    src.save_records(all_records, output)
+    save_records(all_records, output)
 
 
 def run_export(db_path: Path, xlsx_path: Path) -> None:
     xlsx_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        n = src.export_to_excel(db_path, xlsx_path)
+        n = export_to_excel(db_path, xlsx_path)
     except ValueError as e:
         sys.exit(str(e))
     print(f"Đã xuất {n} dòng ra {xlsx_path}")
@@ -125,7 +119,7 @@ def main():
     parser = argparse.ArgumentParser(description="Lấy dữ liệu giá heo hơi.")
     parser.add_argument(
         "--source",
-        choices=src.SOURCES + ["all"],
+        choices=SOURCES + ["all"],
         default="all",
         help="Nguồn dữ liệu, mặc định lấy tất cả để so sánh",
     )
