@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Nhật ký hoạt động{% endblock %}
+{% block brand_title %}📋 Nhật ký hoạt động{% endblock %}
+{% block brand_sub %}200 hoạt động gần nhất{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Thời gian</th>
+            <th>Tài khoản</th>
+            <th>Hành động</th>
+            <th>Chi tiết</th>
+            <th>IP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          <tr>
+            <td>{{ e.at }}</td>
+            <td>{{ e.username or '—' }}</td>
+            <td>{{ e.action }}</td>
+            <td class="detail-cell">{{ e.detail or '' }}</td>
+            <td>{{ e.ip or '' }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">Chưa có hoạt động nào được ghi lại.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

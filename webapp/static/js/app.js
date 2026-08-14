@@ -6,14 +6,6 @@ const SHORT_LABEL = {
   "baovanhoa.vn": "BaoVanHoa",
 };
 
-const el = (id) => document.getElementById(id);
-const fmtPrice = (v) => (v === null || v === undefined ? "" : Math.round(v).toLocaleString("vi-VN"));
-
-function dmyToIso(dmy) {
-  const [d, m, y] = dmy.split("/");
-  return `${y}-${m}-${d}`;
-}
-
 const WEEKDAY_NAMES = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
 function getIsoWeek(date) {

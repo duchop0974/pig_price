@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Quản lý tài khoản{% endblock %}
+{% block brand_title %}👤 Quản lý tài khoản{% endblock %}
+{% block brand_sub %}Chỉ admin xem được trang này{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h2>Tạo tài khoản mới</h2>
+    <form id="user-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-username">Tên đăng nhập</label>
+        <input type="text" id="new-username" placeholder="VD: hue.xh1" required>
+      </div>
+      <div class="control-row">
+        <label for="new-display-name">Tên hiển thị</label>
+        <input type="text" id="new-display-name" placeholder="VD: Huệ - Trại XH1">
+      </div>
+      <div class="control-row">
+        <label for="new-password">Mật khẩu</label>
+        <input type="text" id="new-password" placeholder="Tối thiểu 6 ký tự" required>
+      </div>
+      <div class="control-row">
+        <label for="new-role">Quyền</label>
+        <select id="new-role">
+          <option value="user" selected>Người dùng</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Tạo tài khoản</button>
+      </div>
+      <p id="user-msg" class="msg"></p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Danh sách tài khoản</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Tên đăng nhập</th>
+            <th>Tên hiển thị</th>
+            <th>Quyền</th>
+            <th>Trạng thái</th>
+            <th>Tạo lúc</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="user-list">
+          {% for u in users %}
+          <tr data-id="{{ u.id }}">
+            <td>{{ u.username }}</td>
+            <td>{{ u.display_name }}</td>
+            <td><span class="role-badge {{ 'role-user' if u.role == 'user' else '' }}">{{ 'Admin' if u.role == 'admin' else 'Người dùng' }}</span></td>
+            <td>
+              <span class="status-dot {{ '' if u.is_active else 'inactive' }}">{{ 'Hoạt động' if u.is_active else 'Đã khoá' }}</span>
+            </td>
+            <td>{{ u.created_at }}</td>
+            <td>
+              <button type="button" class="btn btn-ghost btn-sm btn-toggle" data-id="{{ u.id }}" data-active="{{ 1 if u.is_active else 0 }}">
+                {{ 'Khoá' if u.is_active else 'Mở lại' }}
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm btn-reset" data-id="{{ u.id }}">Đặt lại mật khẩu</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin_users.js') }}"></script>
+{% endblock %}

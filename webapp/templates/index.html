@@ -1,40 +1,22 @@
-<!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Giá heo hơi</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-</head>
-<body>
-<header class="app-header">
-  <img class="app-logo" src="{{ url_for('static', filename='logo-icon.png') }}" alt="Xuan Thien Group">
-  <h1>🐷 Giá heo hơi</h1>
-  <p class="sub">So sánh giá heo hơi giữa các nguồn</p>
-  <p id="current-date" class="current-date"></p>
-</header>
+{% extends "base.html" %}
+{% block title %}Giá heo hơi{% endblock %}
+{% block extra_head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>{% endblock %}
+{% block brand_title %}🐷 Giá heo hơi{% endblock %}
+{% block brand_sub %}So sánh giá giữa các nguồn{% endblock %}
+{% block topbar_actions_extra %}<span id="current-date" class="current-date"></span>{% endblock %}
 
-<main>
+{% block content %}
   <section class="controls card">
-    <div class="control-row buttons">
+    <div class="toolbar">
       <button id="btn-today" class="btn btn-primary btn-hero">🔄 Cập nhật giá hôm nay</button>
-    </div>
-    <div class="control-row buttons">
-      <button id="btn-bydate-toggle" class="btn">📅 Lấy giá theo ngày</button>
-    </div>
-    <div class="control-row buttons">
-      <a id="btn-goto-plan" class="btn" href="{{ url_for('plans_page') }}">🗓️ Kế hoạch xuất bán heo</a>
+      <button id="btn-bydate-toggle" class="btn btn-ghost">📅 Xem theo ngày khác</button>
     </div>
     <div class="control-row date-row" id="date-row" hidden>
       <label for="date-picker">Chọn ngày</label>
       <input type="date" id="date-picker">
     </div>
     <div class="control-row buttons" id="date-confirm-row" hidden>
-      <button id="btn-bydate" class="btn btn-primary">✅ Xác nhận lấy giá</button>
-    </div>
-    <div class="control-row buttons">
-      <a id="btn-export" class="btn" href="/api/export.xlsx">⬇️ Xuất Excel</a>
+      <button id="btn-bydate" class="btn btn-primary btn-sm">✅ Xác nhận lấy giá</button>
     </div>
     <p id="refresh-msg" class="msg"></p>
   </section>
@@ -59,7 +41,10 @@
   </section>
 
   <section class="card table-wrap">
-    <h2>Bảng giá chi tiết</h2>
+    <div class="section-head">
+      <h2>Bảng giá chi tiết</h2>
+      <a id="btn-export" class="btn btn-ghost btn-sm" href="/api/export.xlsx">⬇️ Xuất Excel</a>
+    </div>
     <div class="control-row">
       <label for="region-select">Miền</label>
       <select id="region-select"><option value="">Tất cả</option></select>
@@ -67,17 +52,13 @@
     <div id="table-status" class="msg">Đang tải dữ liệu...</div>
     <div id="price-cards" class="price-cards"></div>
   </section>
-</main>
+{% endblock %}
 
-<footer>
-  <img class="footer-logo" src="{{ url_for('static', filename='logo-full.png') }}" alt="Xuan Thien Group">
+{% block footer_extra %}
   <p>Nguồn: nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn, vinanet.vn, baovanhoa.vn</p>
-  <p>Người phát triển: Nguyễn Đức Hợp</p>
-  <form method="post" action="{{ url_for('logout') }}">
-    <button type="submit" class="btn">Đăng xuất</button>
-  </form>
-</footer>
+{% endblock %}
 
-<script src="{{ url_for('static', filename='app.js') }}"></script>
-</body>
-</html>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% endblock %}

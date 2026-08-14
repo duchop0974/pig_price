@@ -1,12 +1,3 @@
-const el = (id) => document.getElementById(id);
-const fmtPrice = (v) => (v === null || v === undefined ? "" : Math.round(v).toLocaleString("vi-VN"));
-
-function fmtIsoDate(iso) {
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
-}
-
 async function loadFarms(selectCode) {
   const res = await fetch("/api/farms");
   const farms = await res.json();
@@ -112,6 +103,7 @@ function renderPlans(plans) {
           <strong>${p.farm}${p.zone ? " · " + p.zone : ""}</strong>
           ${planStatusBadge(p)}
         </div>
+        ${p.created_by ? `<div class="plan-row"><span>Tạo bởi</span><strong>${p.created_by}</strong></div>` : ""}
         <div class="plan-row"><span>Ngày dự kiến</span><strong>${fmtIsoDate(p.planned_date)}</strong></div>
         <div class="plan-row"><span>Số lượng</span><strong>${p.quantity} con</strong></div>
         <div class="plan-row"><span>Giá mong muốn</span><strong>${fmtPrice(p.target_price)} đ/kg</strong></div>

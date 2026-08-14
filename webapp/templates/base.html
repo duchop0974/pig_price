@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Giá heo hơi{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% block extra_head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% block header %}
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="{{ url_for('prices.index') }}">
+      <img class="brand-logo" src="{{ url_for('static', filename='img/logo-icon.png') }}" alt="Xuan Thien Group">
+      <span class="brand-text">
+        <strong>{% block brand_title %}🐷 Giá heo hơi{% endblock %}</strong>
+        <small>{% block brand_sub %}So sánh giá giữa các nguồn{% endblock %}</small>
+      </span>
+    </a>
+    <nav class="topbar-nav">
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'prices.index' else '' }}" href="{{ url_for('prices.index') }}">Giá hôm nay</a>
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch xuất bán</a>
+      {% if current_user and current_user.role == 'admin' %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_users_page' else '' }}" href="{{ url_for('admin.admin_users_page') }}">Tài khoản</a>
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_audit_page' else '' }}" href="{{ url_for('admin.admin_audit_page') }}">Nhật ký</a>
+      {% endif %}
+    </nav>
+    <div class="topbar-actions">
+      {% block topbar_actions_extra %}{% endblock %}
+      {% if current_user %}<span class="current-user">{{ current_user.display_name }}</span>{% endif %}
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <button type="submit" class="btn btn-ghost btn-sm">Đăng xuất</button>
+      </form>
+    </div>
+  </div>
+</header>
+{% endblock %}
+
+<main>
+{% block content %}{% endblock %}
+</main>
+
+<footer>
+  {% block footer %}
+  <img class="footer-logo" src="{{ url_for('static', filename='img/logo-full.png') }}" alt="Xuan Thien Group">
+  {% block footer_extra %}{% endblock %}
+  <p>Người phát triển: Nguyễn Đức Hợp</p>
+  {% endblock %}
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>
