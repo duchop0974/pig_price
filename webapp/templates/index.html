@@ -9,19 +9,29 @@
 </head>
 <body>
 <header class="app-header">
+  <img class="app-logo" src="{{ url_for('static', filename='logo-icon.png') }}" alt="Xuan Thien Group">
   <h1>🐷 Giá heo hơi</h1>
   <p class="sub">So sánh giá heo hơi giữa các nguồn</p>
+  <p id="current-date" class="current-date"></p>
 </header>
 
 <main>
   <section class="controls card">
     <div class="control-row buttons">
-      <button id="btn-today" class="btn btn-primary">🔄 Lấy giá hôm nay</button>
+      <button id="btn-today" class="btn btn-primary btn-hero">🔄 Cập nhật giá hôm nay</button>
     </div>
-    <div class="control-row">
+    <div class="control-row buttons">
+      <button id="btn-bydate-toggle" class="btn">📅 Lấy giá theo ngày</button>
+    </div>
+    <div class="control-row buttons">
+      <a id="btn-goto-plan" class="btn" href="{{ url_for('plans_page') }}">🗓️ Kế hoạch xuất bán heo</a>
+    </div>
+    <div class="control-row date-row" id="date-row" hidden>
       <label for="date-picker">Chọn ngày</label>
       <input type="date" id="date-picker">
-      <button id="btn-bydate" class="btn">📅 Lấy giá theo ngày</button>
+    </div>
+    <div class="control-row buttons" id="date-confirm-row" hidden>
+      <button id="btn-bydate" class="btn btn-primary">✅ Xác nhận lấy giá</button>
     </div>
     <div class="control-row buttons">
       <a id="btn-export" class="btn" href="/api/export.xlsx">⬇️ Xuất Excel</a>
@@ -29,17 +39,9 @@
     <p id="refresh-msg" class="msg"></p>
   </section>
 
-  <section id="sources-updated" class="card sources-updated"></section>
+  <section id="region-summary" class="card region-summary"></section>
 
-  <section class="card table-wrap">
-    <div id="table-status" class="msg">Đang tải dữ liệu...</div>
-    <div class="table-scroll">
-      <table id="price-table">
-        <thead><tr id="table-head"></tr></thead>
-        <tbody id="table-body"></tbody>
-      </table>
-    </div>
-  </section>
+  <section id="sources-updated" class="card sources-updated"></section>
 
   <section class="card chart-section">
     <h2>Xu hướng giá</h2>
@@ -55,10 +57,21 @@
     </div>
     <canvas id="price-chart" height="220"></canvas>
   </section>
+
+  <section class="card table-wrap">
+    <h2>Bảng giá chi tiết</h2>
+    <div class="control-row">
+      <label for="region-select">Miền</label>
+      <select id="region-select"><option value="">Tất cả</option></select>
+    </div>
+    <div id="table-status" class="msg">Đang tải dữ liệu...</div>
+    <div id="price-cards" class="price-cards"></div>
+  </section>
 </main>
 
 <footer>
-  <p>Nguồn: nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn, vinanet.vn</p>
+  <img class="footer-logo" src="{{ url_for('static', filename='logo-full.png') }}" alt="Xuan Thien Group">
+  <p>Nguồn: nongnghiepmoitruong.vn, vietnambiz.vn, greenfeed.com.vn, vinanet.vn, baovanhoa.vn</p>
   <p>Người phát triển: Nguyễn Đức Hợp</p>
   <form method="post" action="{{ url_for('logout') }}">
     <button type="submit" class="btn">Đăng xuất</button>

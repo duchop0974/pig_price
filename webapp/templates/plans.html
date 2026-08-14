@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kế hoạch xuất bán heo</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="app-header">
+  <img class="app-logo" src="{{ url_for('static', filename='logo-icon.png') }}" alt="Xuan Thien Group">
+  <h1>🗓️ Kế hoạch xuất bán heo</h1>
+  <p class="sub">Lên kế hoạch xuất bán & theo dõi giá mong muốn</p>
+</header>
+
+<main>
+  <section class="controls card">
+    <div class="control-row buttons">
+      <a id="btn-home" class="btn" href="{{ url_for('index') }}">🏠 Trang chủ</a>
+    </div>
+  </section>
+
+  <section id="plan-section" class="card plan-section">
+    <h2>Thêm kế hoạch mới</h2>
+    <form id="plan-form" class="plan-form">
+      <div class="control-row">
+        <label for="plan-date">Ngày dự kiến</label>
+        <input type="date" id="plan-date" required>
+      </div>
+      <div class="control-row">
+        <label for="plan-farm">Trang trại</label>
+        <select id="plan-farm" required></select>
+        <button type="button" id="btn-add-farm" class="btn" title="Thêm trang trại mới">➕ Thêm trại</button>
+      </div>
+      <div class="control-row">
+        <label for="plan-zone">Khu</label>
+        <select id="plan-zone" required></select>
+        <button type="button" id="btn-add-zone" class="btn" title="Thêm khu mới">➕ Thêm khu</button>
+      </div>
+      <div class="control-row">
+        <label for="plan-quantity">Số lượng (con)</label>
+        <input type="number" id="plan-quantity" min="1" step="1" placeholder="VD: 50" required>
+      </div>
+      <div class="control-row">
+        <label for="plan-target-price">Giá mong muốn (đ/kg)</label>
+        <input type="number" id="plan-target-price" min="0" step="1000" placeholder="VD: 65000" required>
+      </div>
+      <div class="control-row">
+        <label for="plan-note">Ghi chú</label>
+        <input type="text" id="plan-note" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Thêm kế hoạch</button>
+      </div>
+      <p id="plan-msg" class="msg"></p>
+    </form>
+  </section>
+
+  <section class="card plan-list-section">
+    <div class="plan-list-head">
+      <h2>Danh sách kế hoạch</h2>
+      <a id="btn-export-plans" class="btn" href="/api/plans/export.xlsx">⬇️ Xuất Excel</a>
+    </div>
+    <div id="plan-list" class="plan-list"></div>
+  </section>
+</main>
+
+<footer>
+  <img class="footer-logo" src="{{ url_for('static', filename='logo-full.png') }}" alt="Xuan Thien Group">
+  <p>Người phát triển: Nguyễn Đức Hợp</p>
+</footer>
+
+<script src="{{ url_for('static', filename='plan.js') }}"></script>
+</body>
+</html>

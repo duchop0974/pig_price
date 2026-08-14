@@ -3,6 +3,7 @@ import re
 import sqlite3
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -22,14 +23,28 @@ REGION_KEYWORDS = [
     ("Nam", "Miền Nam"),
 ]
 
-SOURCES = ["nongnghiepmoitruong", "vietnambiz", "greenfeed", "vinanet"]
+SOURCES = ["nongnghiepmoitruong", "vietnambiz", "greenfeed", "vinanet", "baovanhoa"]
 SOURCE_LABELS = {
     "nongnghiepmoitruong": "nongnghiepmoitruong.vn",
     "vietnambiz": "vietnambiz.vn",
     "greenfeed": "greenfeed.com.vn",
     "vinanet": "vinanet.vn",
+    "baovanhoa": "baovanhoa.vn",
 }
 SOURCE_ORDER = [SOURCE_LABELS[s] for s in SOURCES]
+
+REGION_BUCKETS = [label for _, label in REGION_KEYWORDS]
+# Các nguồn gắn nhãn miền không đồng nhất (vd. TÂY NAM BỘ/ĐÔNG NAM BỘ đều
+# thuộc miền Nam) nên quy hết về 3 miền chuẩn ở REGION_BUCKETS.
+_REGION_ALIAS = {
+    "MIỀN BẮC": "Miền Bắc",
+    "Miền Bắc": "Miền Bắc",
+    "MIỀN TRUNG": "Miền Trung - Tây Nguyên",
+    "Miền Trung - Tây Nguyên": "Miền Trung - Tây Nguyên",
+    "TÂY NAM BỘ": "Miền Nam",
+    "ĐÔNG NAM BỘ": "Miền Nam",
+    "Miền Nam": "Miền Nam",
+}
 
 
 def fetch(url: str) -> str:
@@ -560,7 +575,155 @@ def vnn_fetch_sitemap_backfill(months_back: int = 6) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Điều phối theo nguồn (dùng key ngắn: nongnghiepmoitruong/vietnambiz/greenfeed/vinanet)
+# Nguồn 5: baovanhoa.vn (Báo Văn Hoá) — cập nhật sớm trong ngày.
+# ---------------------------------------------------------------------------
+BVH_SOURCE = SOURCE_LABELS["baovanhoa"]
+BVH_CATEGORY_URL = "https://baovanhoa.vn/kinh-te/"
+BVH_ARTICLE_RE = re.compile(r'href="(/kinh-te/gia-heo-hoi-hom-nay[^"]*\.html)"')
+BVH_DATE_RE = re.compile(r'property="article:published_time" content="(\d{4}-\d{2}-\d{2})T')
+BVH_SITEMAP_ARTICLE_RE = re.compile(r"<loc>(https://baovanhoa\.vn/[^<]*gia-heo-hoi-hom-nay[^<]*)</loc>")
+
+
+def bvh_list_articles() -> list[str]:
+    """Trả về danh sách URL bài viết (chưa biết ngày) từ trang chuyên mục kinh tế."""
+    html = fetch(BVH_CATEGORY_URL)
+    paths = sorted(set(BVH_ARTICLE_RE.findall(html)))
+    return ["https://baovanhoa.vn" + p for p in paths]
+
+
+def bvh_parse(html: str, url: str) -> tuple[str | None, list[dict]]:
+    m = BVH_DATE_RE.search(html)
+    if not m:
+        return None, []
+    y, mo, d = m.group(1).split("-")
+    date_str = f"{d}/{mo}/{y}"
+
+    soup = BeautifulSoup(html, "lxml")
+    content = soup.find(id="abody")
+    if content is None:
+        return date_str, []
+
+    records = []
+    current_region = None
+    for el in content.find_all(["h3", "table"]):
+        if el.name == "h3":
+            text = el.get_text(" ", strip=True)
+            for keyword, label in REGION_KEYWORDS:
+                if keyword.lower() in text.lower():
+                    current_region = label
+                    break
+            continue
+        for row in el.find_all("tr"):
+            cells = row.find_all(["td", "th"])
+            if len(cells) != 2:
+                continue
+            province = cells[0].get_text(" ", strip=True)
+            if province.lower().startswith("địa phương"):
+                continue
+            price = parse_vn_number(cells[1].get_text(" ", strip=True))
+            if price is None:
+                continue
+            records.append(
+                {
+                    "date": date_str,
+                    "source": BVH_SOURCE,
+                    "region": current_region,
+                    "province": province,
+                    "price_vnd_per_kg": price,
+                    "change_vnd_per_kg": None,
+                    "benchmark_price_vnd_per_kg": None,
+                    "source_url": url,
+                }
+            )
+    return date_str, records
+
+
+def bvh_fetch_latest() -> list[dict]:
+    best_date = None
+    best_records = None
+    for url in bvh_list_articles():
+        try:
+            html = fetch(url)
+            date_str, rows = bvh_parse(html, url)
+        except requests.RequestException as e:
+            print(f"[{BVH_SOURCE}] Lỗi khi tải {url}: {e}", file=sys.stderr)
+            continue
+        if date_str and (best_date is None or date_str_to_sortkey(date_str) > date_str_to_sortkey(best_date)):
+            best_date, best_records = date_str, rows
+    return best_records or []
+
+
+def bvh_fetch_by_date(target_date: str) -> list[dict]:
+    for url in bvh_list_articles():
+        try:
+            html = fetch(url)
+            date_str, rows = bvh_parse(html, url)
+        except requests.RequestException as e:
+            print(f"[{BVH_SOURCE}] Lỗi khi tải {url}: {e}", file=sys.stderr)
+            continue
+        if date_str == target_date:
+            return rows
+    return []
+
+
+def bvh_fetch_backfill(limit: int) -> list[dict]:
+    records = []
+    for url in bvh_list_articles()[:limit]:
+        try:
+            html = fetch(url)
+            _, rows = bvh_parse(html, url)
+            records.extend(rows)
+        except requests.RequestException as e:
+            print(f"[{BVH_SOURCE}] Lỗi khi tải {url}: {e}", file=sys.stderr)
+    return records
+
+
+def bvh_fetch_url(url: str) -> list[dict]:
+    html = fetch(url)
+    _, rows = bvh_parse(html, url)
+    return rows
+
+
+def bvh_list_articles_from_sitemap(days_back: int = 30) -> list[tuple[str, str]]:
+    """Dò bài viết cũ qua sitemap theo NGÀY
+    (sitemaps/sitemap-article-YYYY-M-D.xml, tháng/ngày không có số 0 đứng
+    đầu). Mỗi file sitemap ứng đúng 1 ngày nên không cần đọc lastmod, chỉ
+    cần biết đang duyệt file của ngày nào."""
+    from datetime import date, timedelta
+
+    today = date.today()
+    seen = {}
+    for i in range(days_back):
+        d = today - timedelta(days=i)
+        sitemap_url = f"https://baovanhoa.vn/sitemaps/sitemap-article-{d.year}-{d.month}-{d.day}.xml"
+        try:
+            xml = fetch(sitemap_url)
+        except requests.RequestException as e:
+            print(f"[{BVH_SOURCE}] Lỗi khi tải sitemap {sitemap_url}: {e}", file=sys.stderr)
+            continue
+        date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"
+        for m in BVH_SITEMAP_ARTICLE_RE.finditer(xml):
+            seen[m.group(1)] = date_str
+    items = sorted(seen.items(), key=lambda kv: date_str_to_sortkey(kv[1]), reverse=True)
+    return items
+
+
+def bvh_fetch_sitemap_backfill(days_back: int = 30) -> list[dict]:
+    records = []
+    articles = bvh_list_articles_from_sitemap(days_back)
+    print(f"[{BVH_SOURCE}] Tìm thấy {len(articles)} bài qua sitemap ({days_back} ngày gần đây).")
+    for url, _expected_date in articles:
+        try:
+            html = fetch(url)
+            _, rows = bvh_parse(html, url)
+            records.extend(rows)
+        except requests.RequestException as e:
+            print(f"[{BVH_SOURCE}] Lỗi khi tải {url}: {e}", file=sys.stderr)
+    return records
+
+
+# ---------------------------------------------------------------------------
+# Điều phối theo nguồn (dùng key ngắn: nongnghiepmoitruong/vietnambiz/greenfeed/vinanet/baovanhoa)
 # ---------------------------------------------------------------------------
 def fetch_latest_all(sources: list[str] | None = None) -> list[dict]:
     """Lấy dữ liệu mới nhất hiện có của từng nguồn (không nhất thiết cùng ngày
@@ -577,6 +740,8 @@ def fetch_latest_all(sources: list[str] | None = None) -> list[dict]:
                 rows = gf_fetch_latest()
             elif src == "vinanet":
                 rows = vnn_fetch_latest()
+            elif src == "baovanhoa":
+                rows = bvh_fetch_latest()
             else:
                 continue
             print(f"[{SOURCE_LABELS[src]}] lấy được {len(rows)} dòng")
@@ -600,6 +765,8 @@ def fetch_by_date_all(target_date: str, sources: list[str] | None = None) -> lis
                 rows = gf_fetch_by_date(target_date)
             elif src == "vinanet":
                 rows = vnn_fetch_by_date(target_date)
+            elif src == "baovanhoa":
+                rows = bvh_fetch_by_date(target_date)
             else:
                 continue
             if rows:
@@ -638,6 +805,43 @@ CREATE TABLE IF NOT EXISTS prices (
 CREATE INDEX IF NOT EXISTS idx_prices_date ON prices(date);
 CREATE INDEX IF NOT EXISTS idx_prices_source ON prices(source);
 CREATE INDEX IF NOT EXISTS idx_prices_province ON prices(province);
+
+CREATE TABLE IF NOT EXISTS farms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+INSERT OR IGNORE INTO farms (code, created_at) VALUES
+    ('XH1', CURRENT_TIMESTAMP),
+    ('XH2', CURRENT_TIMESTAMP),
+    ('XH3', CURRENT_TIMESTAMP);
+
+CREATE TABLE IF NOT EXISTS zones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    farm TEXT NOT NULL,
+    code TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (farm, code)
+);
+CREATE INDEX IF NOT EXISTS idx_zones_farm ON zones(farm);
+
+CREATE TABLE IF NOT EXISTS sale_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    planned_date TEXT NOT NULL,
+    farm TEXT NOT NULL,
+    zone TEXT,
+    quantity INTEGER NOT NULL,
+    target_price INTEGER NOT NULL,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    -- Các trường ẩn dưới đây không hiện trên form/thẻ kế hoạch, chỉ dùng để
+    -- truy vết khi cần đối soát (ai/khi nào tạo & sửa kế hoạch).
+    created_at TEXT NOT NULL,
+    created_ip TEXT,
+    updated_at TEXT NOT NULL,
+    updated_ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sale_plans_status ON sale_plans(status);
 """
 
 
@@ -763,9 +967,231 @@ def build_comparison_table(records: list[dict]) -> pd.DataFrame:
     return pivot[cols]
 
 
+def build_province_region_map(df: pd.DataFrame) -> dict[str, str]:
+    """Suy ra miền (Bắc/Trung/Nam) cho từng tỉnh từ nhãn 'region' đã cào
+    được, lấy miền xuất hiện nhiều nhất cho mỗi tỉnh vì các nguồn gắn nhãn
+    không đồng nhất với nhau (vd. một nguồn tách riêng Tây Nam Bộ/Đông Nam
+    Bộ, nguồn khác gộp chung Miền Nam)."""
+    if df.empty or "region" not in df.columns:
+        return {}
+    tmp = df.dropna(subset=["region"]).copy()
+    if tmp.empty:
+        return {}
+    tmp["_key"] = tmp["province"].map(normalize_province)
+    tmp["_bucket"] = tmp["region"].map(_REGION_ALIAS)
+    tmp = tmp.dropna(subset=["_bucket"])
+    if tmp.empty:
+        return {}
+    counts = tmp.groupby(["_key", "_bucket"]).size().reset_index(name="n")
+    winners = counts.loc[counts.groupby("_key")["n"].idxmax()]
+    return dict(zip(winners["_key"], winners["_bucket"]))
+
+
 def dates_by_source(records: list[dict]) -> dict[str, str]:
     """Ngày thực tế mà mỗi nguồn trả về trong lần fetch này."""
     result = {}
     for r in records:
         result.setdefault(r["source"], r["date"])
     return result
+
+
+def list_farms(db_path: Path) -> list[str]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("SELECT code FROM farms ORDER BY id ASC").fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
+def create_farm(code: str, db_path: Path) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO farms (code, created_at) VALUES (?, ?)",
+            (code, datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_zones(farm: str, db_path: Path) -> list[str]:
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT code FROM zones WHERE farm = ? ORDER BY id ASC", (farm,)
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
+def create_zone(farm: str, code: str, db_path: Path) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO zones (farm, code, created_at) VALUES (?, ?, ?)",
+            (farm, code, datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Trường hiển thị trên form/thẻ kế hoạch cho người dùng.
+SALE_PLAN_VISIBLE_COLUMNS = [
+    "id",
+    "planned_date",
+    "farm",
+    "zone",
+    "quantity",
+    "target_price",
+    "note",
+    "status",
+]
+
+# Đầy đủ cả trường ẩn (created_at, created_ip, updated_at, updated_ip) — dùng
+# khi truy vết/đối soát hoặc xuất Excel cho quản lý, không hiển thị trên UI.
+SALE_PLAN_ALL_COLUMNS = SALE_PLAN_VISIBLE_COLUMNS + [
+    "created_at",
+    "created_ip",
+    "updated_at",
+    "updated_ip",
+]
+
+
+def create_sale_plan(plan: dict, db_path: Path, ip: str | None = None) -> int:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO sale_plans (planned_date, farm, zone, quantity, target_price, note,
+                                     status, created_at, created_ip, updated_at, updated_ip)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+            """,
+            (
+                plan["planned_date"],
+                plan["farm"],
+                plan.get("zone"),
+                plan["quantity"],
+                plan["target_price"],
+                plan.get("note"),
+                now,
+                ip,
+                now,
+                ip,
+            ),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_sale_plan(plan_id: int, db_path: Path) -> dict | None:
+    if not db_path.exists():
+        return None
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            f"SELECT {', '.join(SALE_PLAN_ALL_COLUMNS)} FROM sale_plans WHERE id = ?",
+            (plan_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_sale_plans(db_path: Path) -> list[dict]:
+    if not db_path.exists():
+        return []
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT {', '.join(SALE_PLAN_VISIBLE_COLUMNS)} FROM sale_plans "
+            "WHERE status != 'deleted' ORDER BY planned_date ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_sale_plan_status(plan_id: int, status: str, db_path: Path, ip: str | None = None) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "UPDATE sale_plans SET status = ?, updated_at = ?, updated_ip = ? WHERE id = ?",
+            (status, datetime.now().isoformat(timespec="seconds"), ip, plan_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_sale_plan(plan_id: int, db_path: Path) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM sale_plans WHERE id = ?", (plan_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+SALE_PLAN_EXPORT_COLUMNS = {
+    "id": "Mã KH",
+    "planned_date": "Ngày dự kiến",
+    "farm": "Trang trại",
+    "zone": "Khu",
+    "quantity": "Số lượng (con)",
+    "target_price": "Giá mong muốn (đ/kg)",
+    "note": "Ghi chú",
+    "status": "Trạng thái",
+    "created_at": "Tạo lúc",
+    "created_ip": "IP tạo",
+    "updated_at": "Sửa lúc",
+    "updated_ip": "IP sửa",
+}
+
+SALE_PLAN_STATUS_LABEL = {
+    "active": "Đang chờ",
+    "done": "Đã bán",
+    "cancelled": "Đã hủy",
+}
+
+
+def export_sale_plans_to_excel(db_path: Path, dest) -> int:
+    """Xuất toàn bộ kế hoạch xuất bán ra Excel, gồm cả trường ẩn để đối soát.
+    `dest` có thể là đường dẫn file hoặc buffer (BytesIO)."""
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"SELECT {', '.join(SALE_PLAN_ALL_COLUMNS)} FROM sale_plans "
+            "WHERE status != 'deleted' ORDER BY planned_date ASC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        raise ValueError("Chưa có kế hoạch nào để xuất.")
+
+    df = pd.DataFrame([dict(r) for r in rows])
+    df["status"] = df["status"].map(lambda s: SALE_PLAN_STATUS_LABEL.get(s, s))
+    df = df.rename(columns=SALE_PLAN_EXPORT_COLUMNS)
+
+    with pd.ExcelWriter(dest, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Ke hoach xuat ban")
+        ws = writer.sheets["Ke hoach xuat ban"]
+        for col_idx, col_name in enumerate(df.columns, start=1):
+            max_len = max(
+                len(str(col_name)),
+                int(df.iloc[:, col_idx - 1].fillna("").astype(str).str.len().max()) if len(df) else 0,
+            )
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 45)
+        ws.freeze_panes = "A2"
+
+    return len(df)

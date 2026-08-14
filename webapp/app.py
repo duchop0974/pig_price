@@ -1,8 +1,9 @@
 """Web app xem & so sánh giá heo hơi trên điện thoại/trình duyệt."""
+import os
 import secrets
 import sys
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -94,6 +95,51 @@ def save_records_locked(records: list[dict]) -> None:
         src.save_records(records, DB_PATH)
 
 
+def create_plan_locked(plan: dict, ip: str | None) -> int:
+    with db_lock:
+        return src.create_sale_plan(plan, DB_PATH, ip)
+
+
+def get_plan_locked(plan_id: int) -> dict | None:
+    with db_lock:
+        return src.get_sale_plan(plan_id, DB_PATH)
+
+
+def list_plans_locked() -> list[dict]:
+    with db_lock:
+        return src.list_sale_plans(DB_PATH)
+
+
+def update_plan_status_locked(plan_id: int, status: str, ip: str | None) -> None:
+    with db_lock:
+        src.update_sale_plan_status(plan_id, status, DB_PATH, ip)
+
+
+def delete_plan_locked(plan_id: int) -> None:
+    with db_lock:
+        src.delete_sale_plan(plan_id, DB_PATH)
+
+
+def list_farms_locked() -> list[str]:
+    with db_lock:
+        return src.list_farms(DB_PATH)
+
+
+def create_farm_locked(code: str) -> None:
+    with db_lock:
+        src.create_farm(code, DB_PATH)
+
+
+def list_zones_locked(farm: str) -> list[str]:
+    with db_lock:
+        return src.list_zones(farm, DB_PATH)
+
+
+def create_zone_locked(farm: str, code: str) -> None:
+    with db_lock:
+        src.create_zone(farm, code, DB_PATH)
+
+
 def latest_date_in(df: pd.DataFrame) -> str | None:
     if df.empty:
         return None
@@ -101,7 +147,12 @@ def latest_date_in(df: pd.DataFrame) -> str | None:
     return df.loc[sort_key.idxmax(), "date"]
 
 
-def payload_from_subset(subset: pd.DataFrame, label_date: str | None, mode: str) -> dict:
+def payload_from_subset(
+    subset: pd.DataFrame,
+    label_date: str | None,
+    mode: str,
+    region_map: dict[str, str] | None = None,
+) -> dict:
     if subset is None or subset.empty:
         return {
             "date": label_date,
@@ -109,8 +160,10 @@ def payload_from_subset(subset: pd.DataFrame, label_date: str | None, mode: str)
             "sources": {},
             "rows": [],
             "source_order": src.SOURCE_ORDER,
+            "regions": src.REGION_BUCKETS,
         }
 
+    region_map = region_map or {}
     records = subset.to_dict(orient="records")
     dates = src.dates_by_source(records)
     table = src.build_comparison_table(records)
@@ -120,6 +173,7 @@ def payload_from_subset(subset: pd.DataFrame, label_date: str | None, mode: str)
         rows.append(
             {
                 "province": province,
+                "region": region_map.get(src.normalize_province(province)),
                 "prices": {
                     col: (None if pd.isna(val) else val) for col, val in row.items()
                 },
@@ -132,6 +186,7 @@ def payload_from_subset(subset: pd.DataFrame, label_date: str | None, mode: str)
         "sources": dates,
         "rows": rows,
         "source_order": src.SOURCE_ORDER,
+        "regions": src.REGION_BUCKETS,
     }
 
 
@@ -145,9 +200,42 @@ def iso_to_dmy(iso_date: str) -> str:
     return f"{d}/{m}/{y}"
 
 
+def current_national_price(df: pd.DataFrame) -> dict:
+    """Giá heo hơi hiện tại (trung bình cả nước, mọi nguồn), lấy theo ngày
+    gần nhất có dữ liệu — dùng làm mốc so sánh chung cho các kế hoạch xuất
+    bán vì kế hoạch không gắn với 1 tỉnh/thành cụ thể."""
+    if df.empty:
+        return {"price": None, "date": None}
+    sort_key = pd.to_datetime(df["date"], format="%d/%m/%Y")
+    latest_date = df.loc[sort_key.idxmax(), "date"]
+    prices = df.loc[df["date"] == latest_date, "price_vnd_per_kg"].dropna()
+    avg_price = round(prices.mean()) if not prices.empty else None
+    return {"price": avg_price, "date": latest_date}
+
+
+def plan_payload(plan: dict, cur: dict) -> dict:
+    reached = cur["price"] is not None and cur["price"] >= plan["target_price"]
+    try:
+        days_left = (date.fromisoformat(plan["planned_date"]) - date.today()).days
+    except ValueError:
+        days_left = None
+    return {
+        **plan,
+        "current_price": cur["price"],
+        "current_price_date": cur["date"],
+        "reached_target": reached,
+        "days_left": days_left,
+    }
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/ke-hoach")
+def plans_page():
+    return render_template("plans.html")
 
 
 @app.route("/api/today")
@@ -158,7 +246,8 @@ def api_today():
     df = load_df()
     label_date = latest_date_in(df)
     subset = df[df["date"] == label_date] if label_date else df
-    return jsonify(payload_from_subset(subset, label_date, mode="exact_date"))
+    region_map = src.build_province_region_map(df)
+    return jsonify(payload_from_subset(subset, label_date, mode="exact_date", region_map=region_map))
 
 
 @app.route("/api/date/<iso_date>")
@@ -177,7 +266,8 @@ def api_date(iso_date: str):
             df = load_df()
 
     subset = df[df["date"] == date_str] if not df.empty else df
-    return jsonify(payload_from_subset(subset, date_str, mode="exact_date"))
+    region_map = src.build_province_region_map(df)
+    return jsonify(payload_from_subset(subset, date_str, mode="exact_date", region_map=region_map))
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -198,7 +288,8 @@ def api_refresh():
 
     df = load_df()
     subset = df[df["date"] == today_str] if not df.empty else df
-    return jsonify(payload_from_subset(subset, today_str, mode="exact_date"))
+    region_map = src.build_province_region_map(df)
+    return jsonify(payload_from_subset(subset, today_str, mode="exact_date", region_map=region_map))
 
 
 @app.route("/api/provinces")
@@ -243,6 +334,133 @@ def api_history():
         for _, row in df.iterrows()
     ]
     return jsonify({"points": points, "source_order": src.SOURCE_ORDER})
+
+
+@app.route("/api/farms", methods=["GET"])
+def api_farms_list():
+    return jsonify(list_farms_locked())
+
+
+@app.route("/api/farms", methods=["POST"])
+def api_farms_create():
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip()
+    if not code:
+        return jsonify({"error": "Vui lòng nhập mã trang trại."}), 400
+    if len(code) > 30:
+        return jsonify({"error": "Mã trang trại quá dài."}), 400
+    create_farm_locked(code)
+    return jsonify(list_farms_locked()), 201
+
+
+@app.route("/api/zones", methods=["GET"])
+def api_zones_list():
+    farm = (request.args.get("farm") or "").strip()
+    if not farm:
+        return jsonify([])
+    return jsonify(list_zones_locked(farm))
+
+
+@app.route("/api/zones", methods=["POST"])
+def api_zones_create():
+    data = request.get_json(silent=True) or {}
+    farm = (data.get("farm") or "").strip()
+    code = (data.get("code") or "").strip()
+    if not farm:
+        return jsonify({"error": "Thiếu trang trại."}), 400
+    if not code:
+        return jsonify({"error": "Vui lòng nhập tên khu."}), 400
+    if len(code) > 30:
+        return jsonify({"error": "Tên khu quá dài."}), 400
+    create_zone_locked(farm, code)
+    return jsonify(list_zones_locked(farm)), 201
+
+
+@app.route("/api/plans", methods=["GET"])
+def api_plans_list():
+    df = load_df()
+    cur = current_national_price(df)
+    plans = list_plans_locked()
+    return jsonify([plan_payload(p, cur) for p in plans])
+
+
+@app.route("/api/plans", methods=["POST"])
+def api_plans_create():
+    data = request.get_json(silent=True) or {}
+    planned_date = data.get("planned_date", "")
+    farm = (data.get("farm") or "").strip()
+    zone = (data.get("zone") or "").strip()
+    note = (data.get("note") or "").strip() or None
+
+    if not farm:
+        return jsonify({"error": "Vui lòng chọn trang trại."}), 400
+    if not zone:
+        return jsonify({"error": "Vui lòng chọn khu."}), 400
+    try:
+        date.fromisoformat(planned_date)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Ngày dự kiến không hợp lệ."}), 400
+    try:
+        quantity = int(data.get("quantity"))
+        target_price = int(data.get("target_price"))
+        if quantity <= 0 or target_price <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "Số lượng hoặc giá mong muốn không hợp lệ."}), 400
+
+    plan_id = create_plan_locked(
+        {
+            "planned_date": planned_date,
+            "farm": farm,
+            "zone": zone,
+            "quantity": quantity,
+            "target_price": target_price,
+            "note": note,
+        },
+        request.remote_addr,
+    )
+    df = load_df()
+    cur = current_national_price(df)
+    plan = get_plan_locked(plan_id)
+    return jsonify(plan_payload(plan, cur)), 201
+
+
+@app.route("/api/plans/<int:plan_id>", methods=["PATCH"])
+def api_plans_update(plan_id: int):
+    data = request.get_json(silent=True) or {}
+    status = data.get("status")
+    if status not in ("active", "done", "cancelled"):
+        return jsonify({"error": "Trạng thái không hợp lệ."}), 400
+    if get_plan_locked(plan_id) is None:
+        return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
+    update_plan_status_locked(plan_id, status, request.remote_addr)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/plans/<int:plan_id>", methods=["DELETE"])
+def api_plans_delete(plan_id: int):
+    if get_plan_locked(plan_id) is None:
+        return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
+    delete_plan_locked(plan_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/plans/export.xlsx")
+def export_plans_excel():
+    buffer = BytesIO()
+    with db_lock:
+        try:
+            src.export_sale_plans_to_excel(DB_PATH, buffer)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 404
+    buffer.seek(0)
+    filename = f"ke_hoach_xuat_ban_{datetime.now():%Y%m%d}.xlsx"
+    return send_file(
+        buffer,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @app.route("/api/export.xlsx")
@@ -295,4 +513,5 @@ if __name__ == "__main__":
     print(f"(lưu tại {PASSWORD_FILE}, sửa file này để đổi mật khẩu)")
     print("=" * 50)
     start_scheduler()
-    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

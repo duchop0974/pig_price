@@ -3,6 +3,7 @@ const SHORT_LABEL = {
   "vietnambiz.vn": "VietnamBiz",
   "greenfeed.com.vn": "GreenFeed",
   "vinanet.vn": "Vinanet",
+  "baovanhoa.vn": "BaoVanHoa",
 };
 
 const el = (id) => document.getElementById(id);
@@ -13,17 +14,126 @@ function dmyToIso(dmy) {
   return `${y}-${m}-${d}`;
 }
 
+const WEEKDAY_NAMES = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
+
+function getIsoWeek(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+function renderCurrentDate() {
+  const now = new Date();
+  const weekday = WEEKDAY_NAMES[now.getDay()];
+  const dd = String(now.getDate()).padStart(2, "0");
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = now.getFullYear();
+  const week = getIsoWeek(now);
+  el("current-date").textContent = `${weekday}, ${dd}/${mm}/${yyyy} · Tuần ${week}`;
+}
+
+let lastPayload = null;
+
+function populateRegionSelect(payload) {
+  const select = el("region-select");
+  if (select.dataset.populated) return;
+  const regions = payload.regions || [];
+  select.innerHTML =
+    `<option value="">Tất cả</option>` +
+    regions.map((r) => `<option value="${r}">${r}</option>`).join("");
+  select.dataset.populated = "1";
+}
+
+function renderCards() {
+  const cards = el("price-cards");
+  const payload = lastPayload;
+  if (!payload || !payload.date) {
+    cards.innerHTML = "";
+    return;
+  }
+
+  const order = payload.source_order || Object.keys(payload.sources);
+  const selectedRegion = el("region-select").value;
+  const rows = selectedRegion
+    ? payload.rows.filter((row) => row.region === selectedRegion)
+    : payload.rows;
+
+  if (!rows.length) {
+    cards.innerHTML = `<p class="msg">Không có dữ liệu.</p>`;
+    return;
+  }
+
+  cards.innerHTML = rows
+    .map((row) => {
+      const sourceRows = order
+        .map((s) => {
+          const v = row.prices[s];
+          const valueHtml =
+            v === null || v === undefined
+              ? `<span class="source-value empty">-</span>`
+              : `<span class="source-value">${fmtPrice(v)}</span>`;
+          return `<div class="source-row"><span class="source-label">${SHORT_LABEL[s] || s}</span>${valueHtml}</div>`;
+        })
+        .join("");
+      return `<article class="province-card"><h3 class="province-name">${row.province}</h3>${sourceRows}</article>`;
+    })
+    .join("");
+}
+
+const REGION_CLASS = {
+  "Miền Bắc": "region-bac",
+  "Miền Trung - Tây Nguyên": "region-trung",
+  "Miền Nam": "region-nam",
+};
+
+function renderRegionSummary(payload) {
+  const box = el("region-summary");
+  if (!payload.date || !payload.rows.length) {
+    box.innerHTML = "";
+    return;
+  }
+
+  const regions = payload.regions || [];
+  const items = regions
+    .map((region) => {
+      const values = payload.rows
+        .filter((row) => row.region === region)
+        .flatMap((row) => Object.values(row.prices))
+        .filter((v) => v !== null && v !== undefined);
+      if (!values.length) return null;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range =
+        min === max
+          ? `${fmtPrice(min)}<span class="unit"> đ/kg</span>`
+          : `${fmtPrice(min)}–${fmtPrice(max)}<span class="unit"> đ/kg</span>`;
+      const cls = REGION_CLASS[region] || "";
+      return `<div class="region-summary-item ${cls}">
+        <div class="region-name">${region}</div>
+        <div class="region-range">${range}</div>
+        <div class="region-date">Ngày ${payload.date}</div>
+      </div>`;
+    })
+    .filter(Boolean)
+    .join("");
+  box.innerHTML = items
+    ? `<h2>Tóm tắt giá theo miền</h2><div class="region-summary-grid">${items}</div>`
+    : "";
+}
+
 function renderComparison(payload) {
+  lastPayload = payload;
   const status = el("table-status");
   const sourcesBox = el("sources-updated");
-  const head = el("table-head");
-  const body = el("table-body");
 
   if (!payload.date) {
     status.textContent = "Chưa có dữ liệu.";
     sourcesBox.innerHTML = "";
-    head.innerHTML = "";
-    body.innerHTML = "";
+    renderRegionSummary(payload);
+    populateRegionSelect(payload);
+    renderCards();
     return;
   }
 
@@ -44,28 +154,9 @@ function renderComparison(payload) {
     .join("");
   sourcesBox.innerHTML = `<strong>Ngày cập nhật theo nguồn:</strong><ul>${sourceItems}</ul>`;
 
-  head.innerHTML =
-    `<th>Địa phương</th>` +
-    order.map((s) => `<th>${SHORT_LABEL[s] || s}</th>`).join("");
-
-  if (!payload.rows.length) {
-    body.innerHTML = `<tr><td colspan="${order.length + 1}">Không có dữ liệu.</td></tr>`;
-    return;
-  }
-
-  body.innerHTML = payload.rows
-    .map((row) => {
-      const cells = order
-        .map((s) => {
-          const v = row.prices[s];
-          return v === null || v === undefined
-            ? `<td class="empty">-</td>`
-            : `<td>${fmtPrice(v)}</td>`;
-        })
-        .join("");
-      return `<tr><td>${row.province}</td>${cells}</tr>`;
-    })
-    .join("");
+  renderRegionSummary(payload);
+  populateRegionSelect(payload);
+  renderCards();
 }
 
 async function loadToday() {
@@ -135,6 +226,7 @@ async function loadChart() {
     "vietnambiz.vn": "#c0392b",
     "greenfeed.com.vn": "#2b6cc0",
     "vinanet.vn": "#8e44ad",
+    "baovanhoa.vn": "#c77c02",
   };
 
   const datasets = (payload.source_order || Object.keys(bySource))
@@ -146,6 +238,8 @@ async function loadChart() {
       backgroundColor: colors[s] || "#888",
       tension: 0.2,
       spanGaps: true,
+      pointRadius: 1.5,
+      pointHoverRadius: 4,
     }));
 
   const ctx = el("price-chart").getContext("2d");
@@ -155,11 +249,15 @@ async function loadChart() {
     data: { labels, datasets },
     options: {
       responsive: true,
+      interaction: { mode: "index", intersect: false },
       scales: {
         x: { ticks: { maxTicksLimit: 6 } },
         y: { title: { display: true, text: "đ/kg" } },
       },
-      plugins: { legend: { position: "bottom" } },
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: { mode: "index", intersect: false },
+      },
     },
   });
 }
@@ -167,18 +265,24 @@ async function loadChart() {
 async function loadProvinces() {
   const res = await fetch("/api/provinces");
   const provinces = await res.json();
+  const options = provinces.map((p) => `<option value="${p}">${p}</option>`).join("");
+  const hanoi = provinces.find((p) => p.toLowerCase().includes("hà nội"));
+
   const select = el("province-select");
   const current = select.value;
-  select.innerHTML = provinces.map((p) => `<option value="${p}">${p}</option>`).join("");
-  if (provinces.includes(current)) {
-    select.value = current;
-  } else {
-    const hanoi = provinces.find((p) => p.toLowerCase().includes("hà nội"));
-    if (hanoi) select.value = hanoi;
-  }
+  select.innerHTML = options;
+  select.value = provinces.includes(current) ? current : hanoi || select.value;
 }
 
 el("btn-today").addEventListener("click", doRefresh);
+el("btn-bydate-toggle").addEventListener("click", () => {
+  const dateRow = el("date-row");
+  const confirmRow = el("date-confirm-row");
+  const showing = !dateRow.hidden;
+  dateRow.hidden = showing;
+  confirmRow.hidden = showing;
+  if (!showing) el("date-picker").focus();
+});
 el("btn-bydate").addEventListener("click", () => {
   const iso = el("date-picker").value;
   if (!iso) {
@@ -192,8 +296,10 @@ el("btn-bydate").addEventListener("click", () => {
 });
 el("province-select").addEventListener("change", loadChart);
 el("days-select").addEventListener("change", loadChart);
+el("region-select").addEventListener("change", renderCards);
 
 (async function init() {
+  renderCurrentDate();
   await loadToday();
   await loadProvinces();
   await loadChart();

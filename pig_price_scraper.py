@@ -1,5 +1,6 @@
 """CLI lấy giá heo hơi từ nhiều nguồn để so sánh, lưu vào SQLite."""
 import argparse
+import math
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -62,6 +63,8 @@ def run_legacy(source: str, mode: str, url: str | None, output: Path, limit: int
                 all_records.extend(src.vnb_fetch_url(url))
             elif s == "vinanet":
                 all_records.extend(src.vnn_fetch_url(url))
+            elif s == "baovanhoa":
+                all_records.extend(src.bvh_fetch_url(url))
             else:
                 print(f"[{src.SOURCE_LABELS[s]}] Nguồn này không hỗ trợ --mode url, bỏ qua.")
         elif mode == "latest":
@@ -73,9 +76,38 @@ def run_legacy(source: str, mode: str, url: str | None, output: Path, limit: int
                 all_records.extend(src.vnb_fetch_backfill(limit))
             elif s == "vinanet":
                 all_records.extend(src.vnn_fetch_backfill(limit))
+            elif s == "baovanhoa":
+                all_records.extend(src.bvh_fetch_backfill(limit))
             else:
                 print(f"[{src.SOURCE_LABELS[s]}] Nguồn này chỉ có dữ liệu mới nhất, không backfill được.")
                 all_records.extend(src.fetch_latest_all([s]))
+
+    src.save_records(all_records, output)
+
+
+def run_deep_backfill(source: str, days: int, output: Path) -> None:
+    """Lấy dữ liệu cũ sâu hơn nhiều so với --mode backfill thường, bằng cách
+    dò qua sitemap của từng trang (nnmt/vinanet/baovanhoa) hoặc nhiều trang
+    danh mục hơn (vietnambiz), thay vì chỉ đọc đúng trang danh sách/danh mục
+    hiện tại (vốn chỉ hiện vài bài gần nhất)."""
+    sources = src.SOURCES if source == "all" else [source]
+    months = max(1, math.ceil(days / 30))
+    pages = max(1, min(10, math.ceil(days / 8)))
+
+    all_records = []
+    for s in sources:
+        if s == "nongnghiepmoitruong":
+            rows = src.nnmt_fetch_sitemap_backfill(months_back=months)
+        elif s == "vinanet":
+            rows = src.vnn_fetch_sitemap_backfill(months_back=months)
+        elif s == "baovanhoa":
+            rows = src.bvh_fetch_sitemap_backfill(days_back=days)
+        elif s == "vietnambiz":
+            rows = src.vnb_fetch_deep_backfill(pages=pages)
+        else:
+            print(f"[{src.SOURCE_LABELS[s]}] Nguồn này không hỗ trợ lấy sâu, bỏ qua.")
+            rows = []
+        all_records.extend(rows)
 
     src.save_records(all_records, output)
 
@@ -99,11 +131,13 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["today", "date", "latest", "backfill", "url", "export"],
+        choices=["today", "date", "latest", "backfill", "deep-backfill", "url", "export"],
         default="today",
         help=(
             "today: giá mới nhất + bảng so sánh (mặc định); "
             "date: giá đúng ngày --date + bảng so sánh; "
+            "deep-backfill: lấy sâu nhiều ngày/tháng qua sitemap (nnmt/vinanet/baovanhoa) "
+            "hoặc nhiều trang danh mục hơn (vietnambiz); "
             "export: xuất toàn bộ dữ liệu ra file Excel; "
             "latest/backfill/url: chế độ nâng cao, không in bảng so sánh"
         ),
@@ -121,6 +155,9 @@ def main():
     parser.add_argument(
         "--limit", type=int, default=20, help="Số bài tối đa khi --mode backfill"
     )
+    parser.add_argument(
+        "--days", type=int, default=30, help="Số ngày muốn lấy sâu về trước khi --mode deep-backfill"
+    )
     args = parser.parse_args()
 
     output = Path(args.output)
@@ -135,6 +172,8 @@ def main():
         except ValueError:
             sys.exit(f"Ngày không hợp lệ: {args.date}. Dùng định dạng dd/mm/yyyy, vd 30/07/2026")
         run_date(args.source, args.date, output)
+    elif args.mode == "deep-backfill":
+        run_deep_backfill(args.source, args.days, output)
     elif args.mode == "export":
         xlsx_path = Path(args.export_file) if args.export_file else Path(f"data/gia_heo_hoi_{datetime.now():%Y%m%d}.xlsx")
         run_export(output, xlsx_path)
