@@ -1,9 +1,52 @@
 {% extends "base.html" %}
 {% block title %}Nhật ký hoạt động{% endblock %}
 {% block brand_title %}📋 Nhật ký hoạt động{% endblock %}
-{% block brand_sub %}200 hoạt động gần nhất{% endblock %}
+{% block brand_sub %}{{ total }} hoạt động (đang xem trang {{ page }}/{{ total_pages }}){% endblock %}
 
 {% block content %}
+  <section class="card">
+    <form method="get" class="plan-form">
+      <div class="control-row">
+        <label for="f-username">Tài khoản</label>
+        <input type="text" id="f-username" name="username" value="{{ filters.username or '' }}" placeholder="VD: admin">
+      </div>
+      <div class="control-row">
+        <label for="f-action">Hành động</label>
+        <select id="f-action" name="action">
+          <option value="">— Tất cả —</option>
+          {% for value, text in all_actions %}
+          <option value="{{ value }}" {% if filters.action == value %}selected{% endif %}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="control-row">
+        <label for="f-entity-type">Loại đối tượng</label>
+        <select id="f-entity-type" name="entity_type">
+          <option value="">— Tất cả —</option>
+          {% for et in ("user", "farm", "zone", "pig_type", "sale_plan") %}
+          <option value="{{ et }}" {% if filters.entity_type == et %}selected{% endif %}>{{ et }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="control-row">
+        <label for="f-entity-id">Mã đối tượng</label>
+        <input type="text" id="f-entity-id" name="entity_id" value="{{ filters.entity_id or '' }}" placeholder="VD: 12">
+      </div>
+      <div class="control-row">
+        <label for="f-date-from">Từ ngày</label>
+        <input type="date" id="f-date-from" name="date_from" value="{{ filters.date_from or '' }}">
+      </div>
+      <div class="control-row">
+        <label for="f-date-to">Đến ngày</label>
+        <input type="date" id="f-date-to" name="date_to" value="{{ filters.date_to or '' }}">
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">🔎 Lọc</button>
+        <a href="{{ url_for('admin.admin_audit_page') }}" class="btn btn-ghost">Xóa lọc</a>
+      </div>
+    </form>
+  </section>
+
   <section class="card">
     <div class="admin-table-wrap">
       <table class="admin-table">
@@ -12,7 +55,8 @@
             <th>Thời gian</th>
             <th>Tài khoản</th>
             <th>Hành động</th>
-            <th>Chi tiết</th>
+            <th>Đối tượng</th>
+            <th>Thay đổi</th>
             <th>IP</th>
           </tr>
         </thead>
@@ -21,15 +65,39 @@
           <tr>
             <td>{{ e.at }}</td>
             <td>{{ e.username or '—' }}</td>
-            <td>{{ e.action }}</td>
-            <td class="detail-cell">{{ e.detail or '' }}</td>
+            <td>{{ action_label(e.action) }}</td>
+            <td>{% if e.entity_type %}{{ e.entity_type }}#{{ e.entity_id }}{% else %}—{% endif %}</td>
+            <td class="detail-cell">
+              {% if e.old_value and e.new_value %}
+                {% for k, v in e.new_value.items() %}
+                  {% if e.old_value.get(k) != v %}<div>{{ k }}: <s>{{ e.old_value.get(k) }}</s> → <strong>{{ v }}</strong></div>{% endif %}
+                {% endfor %}
+              {% elif e.new_value %}
+                {% for k, v in e.new_value.items() %}<div>{{ k }} = {{ v }}</div>{% endfor %}
+              {% elif e.old_value %}
+                {% for k, v in e.old_value.items() %}<div>{{ k }} = {{ v }} <em>(đã xóa)</em></div>{% endfor %}
+              {% endif %}
+              {{ e.detail or '' }}
+            </td>
             <td>{{ e.ip or '' }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="5">Chưa có hoạt động nào được ghi lại.</td></tr>
+          <tr><td colspan="6">Không có hoạt động nào khớp bộ lọc.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
+    {% if total_pages > 1 %}
+    <div class="control-row buttons" style="margin-top: 1rem;">
+      {% if page > 1 %}
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('admin.admin_audit_page', page=page-1, **filters) }}">← Trang trước</a>
+      {% endif %}
+      <span>Trang {{ page }}/{{ total_pages }}</span>
+      {% if page < total_pages %}
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('admin.admin_audit_page', page=page+1, **filters) }}">Trang sau →</a>
+      {% endif %}
+    </div>
+    {% endif %}
   </section>
 {% endblock %}

@@ -20,10 +20,11 @@
         <input type="text" id="new-password" placeholder="Tối thiểu 6 ký tự" required>
       </div>
       <div class="control-row">
-        <label for="new-role">Quyền</label>
+        <label for="new-role">Vai trò</label>
         <select id="new-role">
-          <option value="user" selected>Người dùng</option>
-          <option value="admin">Admin</option>
+          {% for r in roles %}
+          <option value="{{ r.key }}" {{ 'selected' if r.key == 'sales' else '' }}>{{ r.name }}</option>
+          {% endfor %}
         </select>
       </div>
       <div class="control-row buttons">
@@ -41,7 +42,8 @@
           <tr>
             <th>Tên đăng nhập</th>
             <th>Tên hiển thị</th>
-            <th>Quyền</th>
+            <th>Vai trò</th>
+            <th>Trại được gán</th>
             <th>Trạng thái</th>
             <th>Tạo lúc</th>
             <th></th>
@@ -52,7 +54,19 @@
           <tr data-id="{{ u.id }}">
             <td>{{ u.username }}</td>
             <td>{{ u.display_name }}</td>
-            <td><span class="role-badge {{ 'role-user' if u.role == 'user' else '' }}">{{ 'Admin' if u.role == 'admin' else 'Người dùng' }}</span></td>
+            <td>
+              <select class="role-select" data-id="{{ u.id }}">
+                {% for r in roles %}
+                <option value="{{ r.key }}" {{ 'selected' if u.role == r.key else '' }}>{{ r.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td class="farms-cell" data-id="{{ u.id }}">
+              {% if u.role == 'farm' %}
+              <span class="farms-list" data-id="{{ u.id }}">đang tải…</span>
+              <button type="button" class="btn btn-ghost btn-sm btn-assign-farms" data-id="{{ u.id }}">Gán trại</button>
+              {% else %}—{% endif %}
+            </td>
             <td>
               <span class="status-dot {{ '' if u.is_active else 'inactive' }}">{{ 'Hoạt động' if u.is_active else 'Đã khoá' }}</span>
             </td>
@@ -69,9 +83,21 @@
       </table>
     </div>
   </section>
+
+  <div id="farm-assign-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Gán trang trại phụ trách</h3>
+      <div id="farm-assign-list" class="farm-assign-list"></div>
+      <div class="control-row buttons">
+        <button type="button" id="farm-assign-save" class="btn btn-primary">Lưu</button>
+        <button type="button" id="farm-assign-cancel" class="btn btn-ghost">Huỷ</button>
+      </div>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}
+<script>window.ALL_FARMS = {{ farms | tojson }};</script>
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 <script src="{{ url_for('static', filename='js/admin_users.js') }}"></script>
 {% endblock %}

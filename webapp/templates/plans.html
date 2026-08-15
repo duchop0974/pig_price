@@ -1,11 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Kế hoạch xuất bán heo{% endblock %}
 {% block brand_title %}🗓️ Kế hoạch xuất bán{% endblock %}
-{% block brand_sub %}Theo dõi giá mong muốn{% endblock %}
+{% block brand_sub %}Kế hoạch trại · Kế hoạch bán{% endblock %}
 
 {% block content %}
+  <h2 class="section-title">📋 Kế hoạch trại <span class="muted">— nguồn cung heo (BM01)</span></h2>
+
+  {% if current_user_can('plans.create') %}
   <section id="plan-section" class="card plan-section">
-    <h2>Thêm kế hoạch mới</h2>
+    <h2>Thêm kế hoạch trại mới</h2>
     <form id="plan-form" class="plan-form">
       <div class="control-row">
         <label for="plan-date">Ngày dự kiến</label>
@@ -14,20 +17,26 @@
       <div class="control-row">
         <label for="plan-farm">Trang trại</label>
         <select id="plan-farm" required></select>
-        <button type="button" id="btn-add-farm" class="btn btn-ghost btn-sm" title="Thêm trang trại mới">➕ Thêm trại</button>
       </div>
       <div class="control-row">
         <label for="plan-zone">Khu</label>
         <select id="plan-zone" required></select>
-        <button type="button" id="btn-add-zone" class="btn btn-ghost btn-sm" title="Thêm khu mới">➕ Thêm khu</button>
+      </div>
+      <div class="control-row">
+        <label for="plan-shed">Chuồng</label>
+        <input type="text" id="plan-shed" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="plan-lot">Lô</label>
+        <input type="text" id="plan-lot" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="plan-pig-type">Loại heo bán</label>
+        <select id="plan-pig-type" required></select>
       </div>
       <div class="control-row">
         <label for="plan-quantity">Số lượng (con)</label>
         <input type="number" id="plan-quantity" min="1" step="1" placeholder="VD: 50" required>
-      </div>
-      <div class="control-row">
-        <label for="plan-target-price">Giá mong muốn (đ/kg)</label>
-        <input type="number" id="plan-target-price" min="0" step="1000" placeholder="VD: 65000" required>
       </div>
       <div class="control-row">
         <label for="plan-note">Ghi chú</label>
@@ -39,17 +48,129 @@
       <p id="plan-msg" class="msg"></p>
     </form>
   </section>
+  {% endif %}
 
   <section class="card plan-list-section">
     <div class="section-head">
-      <h2>Danh sách kế hoạch</h2>
+      <h2>Danh sách kế hoạch trại</h2>
       <a id="btn-export-plans" class="btn btn-ghost btn-sm" href="/api/plans/export.xlsx">⬇️ Xuất Excel</a>
     </div>
     <div id="plan-list" class="plan-list"></div>
   </section>
+
+  {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}
+  <h2 class="section-title">🧾 Kế hoạch bán <span class="muted">— Phòng bán hàng chào bán cho khách (BM02)</span></h2>
+
+  {% if current_user_can('plans.allocation_create') %}
+  <section id="allocation-section" class="card plan-section">
+    <h2>Tạo kế hoạch bán mới</h2>
+    <form id="allocation-form" class="plan-form">
+      <div class="control-row">
+        <label for="alloc-sale-plan">Từ kế hoạch trại</label>
+        <select id="alloc-sale-plan" required></select>
+      </div>
+      <div class="control-row">
+        <label for="alloc-quantity">Số lượng bán (con)</label>
+        <input type="number" id="alloc-quantity" min="1" step="1" placeholder="VD: 30" required>
+        <p id="alloc-remaining-hint" class="msg"></p>
+      </div>
+      <div class="control-row">
+        <label for="alloc-selling-price">Giá chào bán (đ/kg)</label>
+        <input type="number" id="alloc-selling-price" min="0" step="1000" placeholder="VD: 65000" required>
+      </div>
+      <div class="control-row">
+        <label for="alloc-note">Ghi chú</label>
+        <input type="text" id="alloc-note" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Tạo kế hoạch bán</button>
+      </div>
+      <p id="allocation-msg" class="msg"></p>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="card plan-list-section">
+    <div class="section-head">
+      <h2>Danh sách kế hoạch bán</h2>
+      <a id="btn-export-allocations" class="btn btn-ghost btn-sm" href="/api/allocations/export.xlsx">⬇️ Xuất Excel</a>
+    </div>
+    <div id="allocation-list" class="plan-list"></div>
+  </section>
+
+  <div id="sale-details-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Chốt thông tin bán hàng</h3>
+      <div class="control-row">
+        <label for="sd-customer">Khách hàng</label>
+        <select id="sd-customer"><option value="">-- Chưa chọn --</option></select>
+      </div>
+      <div class="control-row">
+        <label for="sd-contact-note">Ghi chú liên hệ</label>
+        <textarea id="sd-contact-note" rows="3" placeholder="VD: đã gọi điện, khách đồng ý giá..."></textarea>
+      </div>
+      <div class="control-row">
+        <label for="sd-confirmed-date">Ngày chốt bán</label>
+        <input type="date" id="sd-confirmed-date">
+      </div>
+      <div class="control-row">
+        <label for="sd-selling-price">Giá chào bán (đ/kg)</label>
+        <input type="number" id="sd-selling-price" min="0" step="1000" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="sd-delivery-time">Khung giờ giao</label>
+        <input type="text" id="sd-delivery-time" placeholder="VD: 07:00 - 09:00">
+      </div>
+      <div class="control-row">
+        <label for="sd-payment-method">Hình thức thanh toán</label>
+        <select id="sd-payment-method">
+          <option value="">-- Chưa chọn --</option>
+          <option value="bank_transfer_immediate">Chuyển khoản ngay</option>
+          <option value="bank_transfer_24h">Chuyển khoản trước 24h</option>
+          <option value="cash">Tiền mặt</option>
+          <option value="credit">Công nợ</option>
+          <option value="other">Khác</option>
+        </select>
+      </div>
+      <div class="control-row buttons">
+        <button type="button" id="sd-save" class="btn btn-primary">Lưu</button>
+        <button type="button" id="sd-cancel" class="btn btn-ghost">Huỷ</button>
+      </div>
+      <p id="sd-msg" class="msg"></p>
+    </div>
+  </div>
+
+  <div id="revenue-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Ghi nhận doanh thu &amp; hoá đơn</h3>
+      <div class="control-row">
+        <label for="rv-paid-amount">Số tiền đã thu (đ)</label>
+        <input type="number" id="rv-paid-amount" min="0" step="1000" placeholder="VD: 6500000">
+      </div>
+      <div class="control-row">
+        <label for="rv-weighing-ref">Số chứng từ cân</label>
+        <input type="text" id="rv-weighing-ref" placeholder="Tùy chọn — tham chiếu phần mềm cân">
+      </div>
+      <div class="control-row">
+        <label for="rv-invoice-number">Số hoá đơn</label>
+        <input type="text" id="rv-invoice-number" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row buttons">
+        <button type="button" id="rv-save" class="btn btn-primary">Lưu</button>
+        <button type="button" id="rv-cancel" class="btn btn-ghost">Huỷ</button>
+      </div>
+      <p id="rv-msg" class="msg"></p>
+    </div>
+  </div>
+  {% endif %}
 {% endblock %}
 
 {% block scripts %}
+<script>
+  window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};
+  window.CURRENT_USER_ROLE = "{{ current_user.role }}";
+</script>
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 <script src="{{ url_for('static', filename='js/plan.js') }}"></script>
+<script src="{{ url_for('static', filename='js/allocation.js') }}"></script>
 {% endblock %}

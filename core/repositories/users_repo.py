@@ -82,6 +82,58 @@ def verify_password(username: str, password: str, db_path: Path) -> dict | None:
     return user
 
 
+def update_user_role(user_id: int, role: str, db_path: Path) -> None:
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_farm_ids_for_user(user_id: int, db_path: Path) -> list[int]:
+    """Danh sách id trại được gán cho user — dùng để check quyền nhanh (vai
+    trò 'farm'). Rỗng nếu chưa được admin gán trại nào."""
+    conn = get_connection(db_path)
+    try:
+        rows = conn.execute("SELECT farm_id FROM user_farms WHERE user_id = ?", (user_id,)).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
+def list_farms_for_user(user_id: int, db_path: Path) -> list[dict]:
+    """Như list_farm_ids_for_user nhưng kèm code/province — dùng để hiển thị
+    UI (form gán trại, danh sách trại của tài khoản farm)."""
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT f.id, f.code, f.province FROM user_farms uf "
+            "JOIN farms f ON f.id = uf.farm_id WHERE uf.user_id = ? ORDER BY f.id ASC",
+            (user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def assign_user_farms(user_id: int, farm_ids: list[int], db_path: Path) -> None:
+    """Ghi đè toàn bộ tập trại được gán cho user — xoá liên kết cũ rồi chèn
+    lại danh sách mới, khớp UX "tick chọn lại rồi Lưu" của form admin."""
+    now = datetime.now().isoformat(timespec="seconds")
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM user_farms WHERE user_id = ?", (user_id,))
+        conn.executemany(
+            "INSERT INTO user_farms (user_id, farm_id, created_at) VALUES (?, ?, ?)",
+            [(user_id, farm_id, now) for farm_id in farm_ids],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def set_user_active(user_id: int, is_active: bool, db_path: Path) -> None:
     conn = get_connection(db_path)
     try:

@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
-python -c "import flask, apscheduler" >nul 2>&1
+python -c "import flask, apscheduler, waitress" >nul 2>&1
 if errorlevel 1 (
     echo Lan dau chay web server, dang cai dat thu vien can thiet...
     python -m pip install -r requirements.txt

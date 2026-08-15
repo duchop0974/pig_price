@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Phân quyền{% endblock %}
+{% block brand_title %}🔑 Phân quyền{% endblock %}
+{% block brand_sub %}Tuỳ biến quyền theo vai trò — chỉ admin xem được trang này{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h2>Tạo vai trò mới</h2>
+    <form id="role-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-role-key">Mã vai trò</label>
+        <input type="text" id="new-role-key" placeholder="VD: kho (chữ thường, không dấu, không khoảng trắng)" required>
+      </div>
+      <div class="control-row">
+        <label for="new-role-name">Tên hiển thị</label>
+        <input type="text" id="new-role-name" placeholder="VD: Thủ kho" required>
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Tạo vai trò</button>
+      </div>
+      <p id="role-msg" class="msg"></p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Ma trận quyền</h2>
+    <p class="muted">Vai trò <strong>Admin</strong> luôn có toàn quyền, không sửa được. Tick chọn quyền cho các vai trò khác rồi bấm "Lưu thay đổi".</p>
+    <div class="admin-table-wrap">
+      <table class="admin-table permission-matrix">
+        <thead>
+          <tr>
+            <th>Quyền</th>
+            {% for r in roles %}
+            <th>
+              {{ r.name }}
+              {% if not r.is_system %}
+              <button type="button" class="btn btn-ghost btn-sm btn-role-delete" data-key="{{ r.key }}" title="Xóa vai trò">✕</button>
+              {% endif %}
+            </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% set ns = namespace(last_group=None) %}
+          {% for key, label, group in permission_groups %}
+          {% if group != ns.last_group %}
+          <tr class="permission-group-row"><td colspan="{{ roles | length + 1 }}">{{ group }}</td></tr>
+          {% set ns.last_group = group %}
+          {% endif %}
+          <tr data-permission="{{ key }}">
+            <td>{{ label }}</td>
+            {% for r in roles %}
+            <td class="permission-cell">
+              {% if r.key == 'admin' %}
+              <input type="checkbox" checked disabled title="Admin luôn có toàn quyền">
+              {% else %}
+              <input type="checkbox" class="perm-checkbox" data-role="{{ r.key }}" data-permission="{{ key }}" {{ 'checked' if key in r.permission_keys else '' }}>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="control-row buttons">
+      <button type="button" id="permission-save" class="btn btn-primary">Lưu thay đổi</button>
+    </div>
+    <p id="permission-msg" class="msg"></p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin_permissions.js') }}"></script>
+{% endblock %}

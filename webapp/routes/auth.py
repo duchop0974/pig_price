@@ -4,12 +4,22 @@ import secrets
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
+import data_access
+from core import audit_actions
 from core.repositories import users_repo
 from extensions import BOOTSTRAP_PASSWORD_FILE, DB_PATH, db_lock, log_access, log_audit
 
 auth_bp = Blueprint("auth", __name__)
 
 PUBLIC_ENDPOINTS = {"auth.login", "static"}
+
+# Vai trò gốc tạo sẵn khi cài mới (xem seed trong core/db.py). FARM vẫn giữ
+# làm literal vì allowed_farm_ids() bên dưới so sánh cứng với nó (scoping dữ
+# liệu theo trại — khác với gating theo route/menu, không nằm trong hệ phân
+# quyền tuỳ biến ở dưới). Danh sách role đầy đủ (kể cả role tự tạo thêm) giờ
+# là dữ liệu trong bảng roles, không còn là hằng số cố định trong code.
+FARM = "farm"
+ADMIN = "admin"
 
 
 def bootstrap_admin_if_needed() -> None:
@@ -35,7 +45,7 @@ def bootstrap_admin_if_needed() -> None:
 
 @auth_bp.before_app_request
 def require_login():
-    if request.endpoint in ("prices.index", "auth.login"):
+    if request.endpoint in ("dashboard.index", "auth.login"):
         log_access("truy cập" if session.get("user") else "chưa đăng nhập")
     if request.endpoint in PUBLIC_ENDPOINTS:
         return
@@ -45,22 +55,56 @@ def require_login():
         return redirect(url_for("auth.login", next=request.path))
 
 
+def current_user_permissions() -> set[str]:
+    user = session.get("user")
+    if not user:
+        return set()
+    return data_access.effective_permissions_locked(user["role"])
+
+
+def current_user_can(permission_key: str) -> bool:
+    return permission_key in current_user_permissions()
+
+
 @auth_bp.app_context_processor
 def inject_current_user():
-    return {"current_user": session.get("user")}
+    return {
+        "current_user": session.get("user"),
+        "current_user_can": current_user_can,
+        "current_user_permissions": sorted(current_user_permissions()),
+    }
 
 
-def admin_required(view):
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        user = session.get("user")
-        if not user or user.get("role") != "admin":
-            if request.path.startswith("/api/") or request.path.startswith("/admin/"):
-                return jsonify({"error": "Chỉ admin mới có quyền truy cập."}), 403
-            return redirect(url_for("prices.index"))
-        return view(*args, **kwargs)
+def permission_required(*permission_keys):
+    """Decorator chặn route theo tập quyền được phép — quyền hiệu lực của
+    role được tra từ bảng role_permissions (tuỳ biến qua /admin/permissions),
+    thay cho danh sách role hardcode như trước (role_required cũ)."""
 
-    return wrapped
+    def decorator(view):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            user = session.get("user")
+            allowed = bool(user) and bool(
+                data_access.effective_permissions_locked(user["role"]) & set(permission_keys)
+            )
+            if not allowed:
+                if request.path.startswith("/api/") or request.path.startswith("/admin/"):
+                    return jsonify({"error": "Bạn không có quyền thực hiện thao tác này."}), 403
+                return redirect(url_for("dashboard.index"))
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def allowed_farm_ids(user: dict) -> list[int] | None:
+    """None = không giới hạn theo trại (sales/accounting/admin xem được mọi
+    trại). list[int] = các trại được gán cho tài khoản vai trò 'farm' (có
+    thể rỗng nếu admin chưa gán trại nào)."""
+    if user["role"] != FARM:
+        return None
+    return data_access.list_farm_ids_for_user_locked(user["id"])
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -81,15 +125,19 @@ def login():
                 "role": user["role"],
             }
             log_access("đăng nhập thành công")
-            log_audit("login")
-            return redirect(request.args.get("next") or url_for("prices.index"))
+            log_audit(audit_actions.LOGIN)
+            return redirect(request.args.get("next") or url_for("dashboard.index"))
         error = "Sai tên đăng nhập hoặc mật khẩu."
         log_access(f"đăng nhập SAI (tên đăng nhập: {username})")
+        # Ghi cả vào audit_log (không chỉ access.log) để admin xem được số lần
+        # đăng nhập sai qua trang /admin/audit thay vì phải mở file text riêng
+        # — kênh audit chính cần thấy được dấu hiệu dò mật khẩu (brute-force).
+        log_audit(audit_actions.LOGIN_FAILED, detail=f"username={username}", entity_type="user", entity_id=username)
     return render_template("login.html", error=error)
 
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
-    log_audit("logout")
+    log_audit(audit_actions.LOGOUT)
     session.pop("user", None)
     return redirect(url_for("auth.login"))

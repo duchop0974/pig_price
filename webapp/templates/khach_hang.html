@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Khách hàng{% endblock %}
+{% block brand_title %}🤝 Khách hàng{% endblock %}
+{% block brand_sub %}Danh mục khách hàng mua heo{% endblock %}
+
+{% block content %}
+  {% if current_user_can('customers.manage') %}
+  <section class="card">
+    <h2>Thêm khách hàng mới</h2>
+    <form id="customer-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-cus-name">Tên</label>
+        <input type="text" id="new-cus-name" placeholder="VD: Anh Ba - lò mổ Thanh Hoá" required>
+      </div>
+      <div class="control-row">
+        <label for="new-cus-phone">Số điện thoại</label>
+        <input type="text" id="new-cus-phone" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-address">Địa chỉ</label>
+        <input type="text" id="new-cus-address" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-tax-code">Mã số thuế</label>
+        <input type="text" id="new-cus-tax-code" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-email">Email</label>
+        <input type="text" id="new-cus-email" placeholder="Tùy chọn — nhận hoá đơn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-contact-person">Người liên hệ</label>
+        <input type="text" id="new-cus-contact-person" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-contact-title">Chức vụ người liên hệ</label>
+        <input type="text" id="new-cus-contact-title" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row">
+        <label for="new-cus-note">Ghi chú</label>
+        <input type="text" id="new-cus-note" placeholder="Tùy chọn">
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Thêm khách hàng</button>
+      </div>
+      <p id="customer-msg" class="msg"></p>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Danh sách khách hàng</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Tên</th>
+            <th>Số điện thoại</th>
+            <th>Địa chỉ</th>
+            <th>Mã số thuế</th>
+            <th>Email</th>
+            <th>Trạng thái</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="customer-list">
+          {% for c in customers %}
+          <tr data-id="{{ c.id }}">
+            <td>{{ c.name }}</td>
+            <td>{{ c.phone or "" }}</td>
+            <td>{{ c.address or "" }}</td>
+            <td>{{ c.tax_code or "" }}</td>
+            <td>{{ c.email or "" }}</td>
+            <td>
+              <span class="status-dot {{ '' if c.is_active else 'inactive' }}">{{ 'Đang dùng' if c.is_active else 'Đã khoá' }}</span>
+            </td>
+            <td>
+              {% if current_user_can('customers.manage') %}
+              <button type="button" class="btn btn-ghost btn-sm btn-cus-edit" data-id="{{ c.id }}"
+                      data-name="{{ c.name }}" data-phone="{{ c.phone or '' }}"
+                      data-address="{{ c.address or '' }}" data-tax-code="{{ c.tax_code or '' }}"
+                      data-note="{{ c.note or '' }}" data-email="{{ c.email or '' }}"
+                      data-contact-person="{{ c.contact_person or '' }}" data-contact-title="{{ c.contact_title or '' }}">Sửa</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-cus-toggle" data-id="{{ c.id }}" data-active="{{ 1 if c.is_active else 0 }}">
+                {{ 'Khoá' if c.is_active else 'Mở lại' }}
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm btn-cus-delete" data-id="{{ c.id }}">Xóa</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/khach_hang.js') }}"></script>
+{% endblock %}

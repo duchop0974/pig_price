@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Quản lý trang trại / khu{% endblock %}
+{% block brand_title %}🏠 Quản lý trang trại / khu{% endblock %}
+{% block brand_sub %}Chỉnh sửa: Admin · Xem: Admin, Ban lãnh đạo{% endblock %}
+
+{% block content %}
+  {% if current_user_can('admin.farms.manage') %}
+  <section class="card">
+    <h2>Thêm trang trại mới</h2>
+    <form id="farm-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-farm-code">Mã trang trại</label>
+        <input type="text" id="new-farm-code" placeholder="VD: XH4" required>
+      </div>
+      <div class="control-row">
+        <label for="new-farm-province">Tỉnh/thành</label>
+        <input type="text" id="new-farm-province" placeholder="VD: Đồng Nai — dùng để so giá đúng vùng">
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Thêm trang trại</button>
+      </div>
+      <p id="farm-msg" class="msg"></p>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Danh sách trang trại</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Mã trang trại</th>
+            <th>Tỉnh/thành</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="farm-list">
+          {% for f in farms %}
+          <tr data-id="{{ f.id }}">
+            <td>{{ f.code }}</td>
+            <td>{{ f.province or '—' }}</td>
+            <td>
+              {% if current_user_can('admin.farms.manage') %}
+              <button type="button" class="btn btn-ghost btn-sm btn-farm-edit" data-id="{{ f.id }}" data-code="{{ f.code }}" data-province="{{ f.province or '' }}">Sửa</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-farm-delete" data-id="{{ f.id }}">Xóa</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Quản lý khu</h2>
+    <div class="control-row">
+      <label for="zone-farm-select">Trang trại</label>
+      <select id="zone-farm-select"></select>
+    </div>
+    {% if current_user_can('admin.farms.manage') %}
+    <form id="zone-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-zone-code">Tên khu mới</label>
+        <input type="text" id="new-zone-code" placeholder="VD: Khu A" required>
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Thêm khu</button>
+      </div>
+      <p id="zone-msg" class="msg"></p>
+    </form>
+    {% endif %}
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Tên khu</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="zone-list"></tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin_farms.js') }}"></script>
+{% endblock %}

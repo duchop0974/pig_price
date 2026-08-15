@@ -74,9 +74,9 @@ def iso_to_dmy(iso_date: str) -> str:
     return f"{d}/{m}/{y}"
 
 
-@prices_bp.route("/")
-def index():
-    return render_template("index.html")
+@prices_bp.route("/gia-heo")
+def price_page():
+    return render_template("gia_heo.html")
 
 
 @prices_bp.route("/api/today")

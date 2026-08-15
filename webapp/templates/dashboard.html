@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Tổng quan{% endblock %}
+{% block brand_title %}🐷 Tổng quan{% endblock %}
+{% block brand_sub %}Số liệu chính của quy trình bán heo{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h2>Số liệu chính</h2>
+    <div class="kpi-grid">
+      <div class="kpi-tile kpi-pending">
+        <div class="kpi-label">Chờ duyệt</div>
+        <div class="kpi-value">{{ stats.pending_approval }}<span class="unit">kế hoạch</span></div>
+      </div>
+      <div class="kpi-tile kpi-approved">
+        <div class="kpi-label">Đã duyệt, chưa bán</div>
+        <div class="kpi-value">{{ stats.approved_not_sold }}<span class="unit">kế hoạch</span></div>
+      </div>
+      <div class="kpi-tile kpi-sold">
+        <div class="kpi-label">Đã bán trong tháng</div>
+        <div class="kpi-value">{{ stats.sold_this_month }}<span class="unit">kế hoạch</span></div>
+      </div>
+      {% if current_user_can('plans.revenue_details') %}
+      <div class="kpi-tile kpi-revenue">
+        <div class="kpi-label">Doanh thu đã thu (tháng này)</div>
+        <div class="kpi-value">{{ stats.revenue_this_month_fmt }}<span class="unit">đ</span></div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Quy trình xuất bán</h2>
+    <p class="dashboard-intro">Toàn bộ quy trình từ lập kế hoạch đến ghi nhận doanh thu, thể hiện dưới dạng sơ đồ — bấm vào từng bước để thao tác hoặc theo dõi.</p>
+    <a class="btn btn-primary" href="{{ url_for('dashboard.quy_trinh') }}">Xem sơ đồ quy trình →</a>
+  </section>
+
+  <section class="card">
+    <h2>Lối tắt</h2>
+    <div class="quick-links">
+      <a class="btn btn-ghost" href="{{ url_for('plans.plans_page') }}">🗓️ Kế hoạch xuất bán</a>
+      {% if current_user_can('customers.view') %}
+      <a class="btn btn-ghost" href="{{ url_for('plans.customers_page') }}">🤝 Khách hàng</a>
+      {% endif %}
+      {% if current_user_can('admin.farms.view') %}
+      <a class="btn btn-ghost" href="{{ url_for('admin.admin_farms_page') }}">🏠 Trang trại / Khu</a>
+      {% endif %}
+      {% if current_user_can('admin.pig_types.view') %}
+      <a class="btn btn-ghost" href="{{ url_for('admin.admin_pig_types_page') }}">🐖 Danh mục heo</a>
+      {% endif %}
+      <a class="btn btn-ghost" href="{{ url_for('prices.price_page') }}">📈 Giá heo tham khảo</a>
+    </div>
+  </section>
+{% endblock %}

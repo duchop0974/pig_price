@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Quy trình xuất bán{% endblock %}
+{% block brand_title %}🔗 Quy trình xuất bán{% endblock %}
+{% block brand_sub %}Sơ đồ các bước từ lập kế hoạch đến ghi nhận doanh thu{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h2>Sơ đồ quy trình</h2>
+    <p class="dashboard-intro">Mỗi ô là một bước trong quy trình bán heo. Bước bạn có quyền thao tác sẽ bấm được để đi thẳng vào chức năng; bước bạn không có quyền vẫn hiển thị (mờ, có khoá 🔒) để nắm được toàn bộ quy trình.</p>
+    <div class="flow-diagram">
+      {% for step in steps %}
+        {% set can_act = current_user_can(step.permission) %}
+        {% if can_act %}
+        <a class="flow-step" href="{{ url_for(step.endpoint) }}">
+        {% else %}
+        <span class="flow-step is-locked" aria-disabled="true" title="Bạn không có quyền thao tác bước này">
+        {% endif %}
+          <span class="flow-step-icon">{{ step.icon }}</span>
+          <span class="flow-step-title">{{ step.title }}</span>
+          <span class="flow-step-desc">{{ step.desc }}</span>
+          {% if not can_act %}<span class="flow-step-lock">🔒</span>{% endif %}
+        {% if can_act %}</a>{% else %}</span>{% endif %}
+        {% if not loop.last %}<span class="flow-arrow" aria-hidden="true">➜</span>{% endif %}
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

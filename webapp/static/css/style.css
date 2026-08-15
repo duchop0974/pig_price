@@ -91,6 +91,22 @@ h1, h2, h3 { font-weight: 700; }
 }
 .nav-link:hover { background: rgba(255, 255, 255, 0.14); }
 .nav-link.is-active { background: #fff; color: var(--primary-dark); }
+.nav-link.nav-link-muted { opacity: 0.7; font-weight: 500; }
+
+.nav-toggle-input { display: none; }
+.nav-toggle-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  user-select: none;
+}
+.nav-toggle-btn:hover { background: rgba(255, 255, 255, 0.14); }
 
 .topbar-actions {
   display: flex;
@@ -385,14 +401,24 @@ h2.section-title, .card > h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
   background: var(--success-light);
 }
 
+.plan-card-disabled { opacity: 0.6; }
+
 .plan-card-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.2rem;
   font-size: 1rem;
+}
+
+.plan-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
 }
 
 .plan-row {
@@ -433,6 +459,11 @@ h2.section-title, .card > h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
 .plan-badge.today { background: var(--primary-light); color: var(--primary-dark); border-color: transparent; }
 .plan-badge.done { background: var(--surface-muted); color: var(--muted); }
 .plan-badge.cancelled { background: var(--surface-muted); color: var(--border); }
+.plan-badge.disabled { background: var(--danger-light); color: var(--danger); border-color: transparent; }
+.plan-badge.pending-approval { background: var(--primary-light); color: var(--primary-dark); border-color: transparent; }
+.plan-badge.rejected { background: var(--danger-light); color: var(--danger); border-color: transparent; }
+
+.plan-note-danger { color: var(--danger); font-style: normal; }
 
 .plan-actions {
   display: flex;
@@ -440,6 +471,106 @@ h2.section-title, .card > h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
   margin-top: 0.7rem;
 }
 .plan-actions .btn { flex: 1 1 auto; }
+
+/* ---------------------------------------------------------------------- */
+/* Tổng quan (dashboard) — số liệu KPI                                    */
+/* ---------------------------------------------------------------------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.kpi-tile {
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent, var(--primary));
+}
+
+.kpi-tile .kpi-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent, var(--primary));
+}
+
+.kpi-tile .kpi-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 0.3rem;
+  line-height: 1.2;
+}
+
+.kpi-tile .kpi-value .unit {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 0.2rem;
+}
+
+.kpi-tile.kpi-pending { --accent: var(--primary); }
+.kpi-tile.kpi-approved { --accent: #c77c02; }
+.kpi-tile.kpi-sold { --accent: var(--success); }
+.kpi-tile.kpi-revenue { --accent: #7a3fc9; }
+
+.dashboard-intro { color: var(--muted); margin: 0 0 0.9rem; }
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Quy trình xuất bán — sơ đồ                                             */
+/* ---------------------------------------------------------------------- */
+.flow-diagram {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.flow-step {
+  flex: 1 1 180px;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  text-decoration: none;
+  color: var(--text);
+  position: relative;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+a.flow-step:hover { box-shadow: var(--shadow); border-color: var(--primary); }
+
+.flow-step-icon { font-size: 1.4rem; }
+.flow-step-title { font-weight: 700; font-size: 0.92rem; }
+.flow-step-desc { font-size: 0.8rem; color: var(--muted); }
+
+.flow-step.is-locked { opacity: 0.55; cursor: not-allowed; }
+.flow-step-lock { position: absolute; top: 0.6rem; right: 0.6rem; font-size: 0.9rem; }
+
+.flow-arrow {
+  align-self: center;
+  font-size: 1.3rem;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .flow-diagram { flex-direction: column; }
+  .flow-arrow { transform: rotate(90deg); }
+}
 
 /* ---------------------------------------------------------------------- */
 /* Quản lý tài khoản / nhật ký hoạt động (admin)                          */
@@ -476,6 +607,47 @@ h2.section-title, .card > h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
   color: var(--primary-dark);
 }
 .role-badge.role-user { background: var(--surface-muted); color: var(--muted); }
+
+.role-select { padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid var(--border); font-size: 0.85rem; }
+
+.farms-list { font-size: 0.85rem; color: var(--muted); margin-right: 0.4rem; }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.hidden { display: none; }
+.modal-box {
+  background: var(--surface, #fff);
+  border-radius: 10px;
+  padding: 1.2rem;
+  width: min(360px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.farm-assign-list { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.8rem 0; }
+.farm-assign-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+
+/* ---------------------------------------------------------------------- */
+/* Phân quyền (admin)                                                     */
+/* ---------------------------------------------------------------------- */
+.muted { color: var(--muted); font-size: 0.85rem; }
+.permission-matrix .permission-group-row td {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.permission-matrix .permission-cell { text-align: center; white-space: nowrap; }
+.permission-matrix th .btn-role-delete { margin-left: 0.4rem; }
 
 .status-dot {
   display: inline-flex;
@@ -535,10 +707,23 @@ footer p { margin: 0.15rem 0; }
 /* Responsive                                                              */
 /* ---------------------------------------------------------------------- */
 @media (max-width: 640px) {
-  .topbar-inner { justify-content: center; text-align: center; }
-  .brand { margin-right: 0; }
-  .topbar-nav { order: 3; width: 100%; justify-content: center; }
-  .topbar-actions { order: 2; margin-left: 0; }
+  .topbar-inner { text-align: left; }
+  .brand { margin-right: 0; flex: 1 1 auto; }
+  .nav-toggle-btn { display: inline-flex; order: 1; }
+  .topbar-actions { order: 2; width: 100%; margin-left: 0; justify-content: center; flex-wrap: wrap; }
+  .topbar-nav {
+    order: 3;
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    justify-content: flex-start;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 0.35rem;
+    gap: 0.15rem;
+  }
+  .nav-toggle-input:checked ~ .topbar-nav { display: flex; }
+  .nav-link { text-align: center; padding: 0.6rem 0.85rem; }
 }
 
 @media (max-width: 420px) {

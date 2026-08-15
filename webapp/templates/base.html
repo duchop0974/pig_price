@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Giá heo hơi{% endblock %}</title>
+<title>{% block title %}Quản lý bán heo{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 {% block extra_head %}{% endblock %}
 </head>
@@ -11,20 +11,38 @@
 {% block header %}
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="{{ url_for('prices.index') }}">
+    <a class="brand" href="{{ url_for('dashboard.index') }}">
       <img class="brand-logo" src="{{ url_for('static', filename='img/logo-icon.png') }}" alt="Xuan Thien Group">
       <span class="brand-text">
-        <strong>{% block brand_title %}🐷 Giá heo hơi{% endblock %}</strong>
-        <small>{% block brand_sub %}So sánh giá giữa các nguồn{% endblock %}</small>
+        <strong>{% block brand_title %}🐷 Quản lý bán heo{% endblock %}</strong>
+        <small>{% block brand_sub %}Tự động hoá & giám sát quy trình bán hàng{% endblock %}</small>
       </span>
     </a>
+    <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+    <label for="nav-toggle" class="nav-toggle-btn" aria-label="Menu">☰</label>
     <nav class="topbar-nav">
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'prices.index' else '' }}" href="{{ url_for('prices.index') }}">Giá hôm nay</a>
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.index' else '' }}" href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
       <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch xuất bán</a>
-      {% if current_user and current_user.role == 'admin' %}
+      {% if current_user_can('customers.view') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.customers_page' else '' }}" href="{{ url_for('plans.customers_page') }}">Khách hàng</a>
+      {% endif %}
+      {% if current_user_can('admin.farms.view') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_farms_page' else '' }}" href="{{ url_for('admin.admin_farms_page') }}">Trang trại / Khu</a>
+      {% endif %}
+      {% if current_user_can('admin.pig_types.view') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_pig_types_page' else '' }}" href="{{ url_for('admin.admin_pig_types_page') }}">Danh mục heo</a>
+      {% endif %}
+      {% if current_user_can('admin.users.manage') %}
       <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_users_page' else '' }}" href="{{ url_for('admin.admin_users_page') }}">Tài khoản</a>
+      {% endif %}
+      {% if current_user_can('admin.permissions.manage') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_permissions_page' else '' }}" href="{{ url_for('admin.admin_permissions_page') }}">Phân quyền</a>
+      {% endif %}
+      {% if current_user_can('admin.audit.view') %}
       <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_audit_page' else '' }}" href="{{ url_for('admin.admin_audit_page') }}">Nhật ký</a>
       {% endif %}
+      <a class="nav-link nav-link-muted {{ 'is-active' if request.endpoint == 'prices.price_page' else '' }}" href="{{ url_for('prices.price_page') }}">Giá heo tham khảo</a>
     </nav>
     <div class="topbar-actions">
       {% block topbar_actions_extra %}{% endblock %}

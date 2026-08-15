@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Danh mục loại heo bán{% endblock %}
+{% block brand_title %}🐖 Danh mục loại heo bán{% endblock %}
+{% block brand_sub %}Chỉnh sửa: Admin · Xem: Admin, Ban lãnh đạo{% endblock %}
+
+{% block content %}
+  {% if current_user_can('admin.pig_types.manage') %}
+  <section class="card">
+    <h2>Thêm loại heo mới</h2>
+    <form id="pig-type-form" class="plan-form">
+      <div class="control-row">
+        <label for="new-pt-code">Mã</label>
+        <input type="text" id="new-pt-code" placeholder="VD: heo-thit" required>
+      </div>
+      <div class="control-row">
+        <label for="new-pt-name">Tên hiển thị</label>
+        <input type="text" id="new-pt-name" placeholder="VD: Heo thịt" required>
+      </div>
+      <div class="control-row buttons">
+        <button type="submit" class="btn btn-primary">➕ Thêm loại heo</button>
+      </div>
+      <p id="pig-type-msg" class="msg"></p>
+    </form>
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <h2>Danh sách loại heo</h2>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Mã</th>
+            <th>Tên hiển thị</th>
+            <th>Trạng thái</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pig-type-list">
+          {% for pt in pig_types %}
+          <tr data-id="{{ pt.id }}">
+            <td>{{ pt.code }}</td>
+            <td>{{ pt.name }}</td>
+            <td>
+              <span class="status-dot {{ '' if pt.is_active else 'inactive' }}">{{ 'Đang dùng' if pt.is_active else 'Đã khoá' }}</span>
+            </td>
+            <td>
+              {% if current_user_can('admin.pig_types.manage') %}
+              <button type="button" class="btn btn-ghost btn-sm btn-pt-edit" data-id="{{ pt.id }}" data-code="{{ pt.code }}" data-name="{{ pt.name }}">Sửa</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-pt-toggle" data-id="{{ pt.id }}" data-active="{{ 1 if pt.is_active else 0 }}">
+                {{ 'Khoá' if pt.is_active else 'Mở lại' }}
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm btn-pt-delete" data-id="{{ pt.id }}">Xóa</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin_pig_types.js') }}"></script>
+{% endblock %}

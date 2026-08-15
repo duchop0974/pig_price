@@ -32,6 +32,7 @@ async function submitUserForm(e) {
 async function handleListClick(e) {
   const toggleBtn = e.target.closest(".btn-toggle");
   const resetBtn = e.target.closest(".btn-reset");
+  const assignBtn = e.target.closest(".btn-assign-farms");
 
   if (toggleBtn) {
     const id = toggleBtn.dataset.id;
@@ -59,8 +60,86 @@ async function handleListClick(e) {
       return;
     }
     alert("Đã đặt lại mật khẩu.");
+  } else if (assignBtn) {
+    await openFarmAssignModal(assignBtn.dataset.id);
   }
+}
+
+async function handleRoleChange(e) {
+  const select = e.target.closest(".role-select");
+  if (!select) return;
+  const id = select.dataset.id;
+  const role = select.value;
+  if (!confirm(`Đổi vai trò tài khoản này thành "${select.options[select.selectedIndex].text}"?`)) {
+    location.reload();
+    return;
+  }
+  const res = await fetch(`/api/admin/users/${id}/role`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(payload.error || "Lỗi khi đổi vai trò.");
+  }
+  location.reload();
+}
+
+async function loadFarmsList(userId) {
+  const span = document.querySelector(`.farms-list[data-id="${userId}"]`);
+  if (!span) return;
+  const res = await fetch(`/api/admin/users/${userId}/farms`);
+  const farms = await res.json();
+  span.textContent = farms.length ? farms.map((f) => f.code).join(", ") : "Chưa gán trại";
+}
+
+let farmAssignUserId = null;
+
+async function openFarmAssignModal(userId) {
+  farmAssignUserId = userId;
+  const res = await fetch(`/api/admin/users/${userId}/farms`);
+  const assigned = await res.json();
+  const assignedIds = new Set(assigned.map((f) => f.id));
+  const list = el("farm-assign-list");
+  list.innerHTML = (window.ALL_FARMS || [])
+    .map(
+      (f) => `<label class="farm-assign-item">
+        <input type="checkbox" value="${f.id}" ${assignedIds.has(f.id) ? "checked" : ""}>
+        ${f.code}${f.province ? " · " + f.province : ""}
+      </label>`
+    )
+    .join("");
+  el("farm-assign-modal").classList.remove("hidden");
+}
+
+function closeFarmAssignModal() {
+  farmAssignUserId = null;
+  el("farm-assign-modal").classList.add("hidden");
+}
+
+async function saveFarmAssign() {
+  const checked = [...el("farm-assign-list").querySelectorAll("input[type=checkbox]:checked")];
+  const farmIds = checked.map((c) => Number(c.value));
+  const res = await fetch(`/api/admin/users/${farmAssignUserId}/farms`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ farm_ids: farmIds }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(payload.error || "Lỗi khi gán trang trại.");
+    return;
+  }
+  const userId = farmAssignUserId;
+  closeFarmAssignModal();
+  await loadFarmsList(userId);
 }
 
 el("user-form").addEventListener("submit", submitUserForm);
 el("user-list").addEventListener("click", handleListClick);
+el("user-list").addEventListener("change", handleRoleChange);
+el("farm-assign-save").addEventListener("click", saveFarmAssign);
+el("farm-assign-cancel").addEventListener("click", closeFarmAssignModal);
+
+document.querySelectorAll(".farms-list").forEach((span) => loadFarmsList(span.dataset.id));
