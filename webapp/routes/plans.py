@@ -9,11 +9,9 @@ from core import audit_actions
 from core import permissions as perm
 from core.repositories.plan_reconciliation_repo import PHOTO_REQUIRED_KINDS, VALID_KINDS as RECONCILE_VALID_KINDS
 from core.scrapers.utils import normalize_province
-from core.services import order_service, plan_service
+from core.services import customer_service, order_service, plan_service
 from data_access import (
     count_orders_for_customer_locked,
-    create_customer_locked,
-    delete_customer_locked,
     export_order_quotation_excel_locked,
     export_orders_excel_locked,
     export_plans_excel_locked,
@@ -31,8 +29,6 @@ from data_access import (
     list_zones_locked,
     load_df,
     save_media_upload_locked,
-    set_customer_active_locked,
-    update_customer_locked,
 )
 from extensions import DB_PATH, log_audit
 from routes.auth import allowed_farm_ids, current_user_permissions, permission_required
@@ -644,12 +640,20 @@ def api_customers_create():
     if contact_title and len(contact_title) > 100:
         return jsonify({"error": "Chức vụ quá dài."}), 400
 
-    customer_id = create_customer_locked(name, phone, address, tax_code, note, email, contact_person, contact_title)
-    log_audit(
-        audit_actions.CUSTOMER_CREATE,
-        entity_type="customer",
-        entity_id=customer_id,
-        new_value={"name": name, "phone": phone, "address": address, "tax_code": tax_code, "email": email},
+    customer_service.create_customer(
+        {
+            "name": name,
+            "phone": phone,
+            "address": address,
+            "tax_code": tax_code,
+            "note": note,
+            "email": email,
+            "contact_person": contact_person,
+            "contact_title": contact_title,
+        },
+        DB_PATH,
+        ip=request.remote_addr,
+        username=session["user"]["username"],
     )
     return jsonify(list_customers_locked()), 201
 
@@ -683,20 +687,22 @@ def api_customers_update(customer_id: int):
     if contact_title and len(contact_title) > 100:
         return jsonify({"error": "Chức vụ quá dài."}), 400
 
-    update_customer_locked(
-        customer_id, name, phone, address, tax_code, note, email, contact_person, contact_title
-    )
-    log_audit(
-        audit_actions.CUSTOMER_UPDATE,
-        entity_type="customer",
-        entity_id=customer_id,
-        old_value={
-            "name": old_customer["name"],
-            "phone": old_customer["phone"],
-            "address": old_customer["address"],
-            "tax_code": old_customer["tax_code"],
+    customer_service.update_customer(
+        customer_id,
+        {
+            "name": name,
+            "phone": phone,
+            "address": address,
+            "tax_code": tax_code,
+            "note": note,
+            "email": email,
+            "contact_person": contact_person,
+            "contact_title": contact_title,
         },
-        new_value={"name": name, "phone": phone, "address": address, "tax_code": tax_code, "email": email},
+        old_customer,
+        DB_PATH,
+        ip=request.remote_addr,
+        username=session["user"]["username"],
     )
     return jsonify(list_customers_locked())
 
@@ -708,11 +714,8 @@ def api_customers_toggle(customer_id: int):
         return jsonify({"error": "Không tìm thấy khách hàng."}), 404
     data = request.get_json(silent=True) or {}
     is_active = bool(data.get("is_active"))
-    set_customer_active_locked(customer_id, is_active)
-    log_audit(
-        audit_actions.CUSTOMER_ACTIVATE if is_active else audit_actions.CUSTOMER_DEACTIVATE,
-        entity_type="customer",
-        entity_id=customer_id,
+    customer_service.set_active(
+        customer_id, is_active, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_customers_locked())
 
@@ -725,12 +728,8 @@ def api_customers_delete(customer_id: int):
         return jsonify({"error": "Không tìm thấy khách hàng."}), 404
     if count_orders_for_customer_locked(customer_id) > 0:
         return jsonify({"error": "Không thể xóa: khách hàng đang được dùng trong kế hoạch xuất bán."}), 400
-    delete_customer_locked(customer_id)
-    log_audit(
-        audit_actions.CUSTOMER_DELETE,
-        entity_type="customer",
-        entity_id=customer_id,
-        old_value={"name": old_customer["name"], "phone": old_customer["phone"]},
+    customer_service.delete_customer(
+        customer_id, old_customer, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_customers_locked())
 

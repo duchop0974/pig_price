@@ -34,8 +34,11 @@ def create_customer(
     email: str | None = None,
     contact_person: str | None = None,
     contact_title: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> int:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             "INSERT INTO customers (name, phone, address, tax_code, note, email, contact_person, "
@@ -52,10 +55,12 @@ def create_customer(
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.lastrowid
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_customer(customer_id: int, db_path: Path) -> dict | None:
@@ -79,34 +84,49 @@ def update_customer(
     email: str | None = None,
     contact_person: str | None = None,
     contact_title: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE customers SET name = ?, phone = ?, address = ?, tax_code = ?, note = ?, "
             "email = ?, contact_person = ?, contact_title = ? WHERE id = ?",
             (name, phone, address, tax_code, note, email, contact_person, contact_title, customer_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def set_customer_active(customer_id: int, is_active: bool, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def set_customer_active(
+    customer_id: int, is_active: bool, db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE customers SET is_active = ? WHERE id = ?", (1 if is_active else 0, customer_id)
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_customer(customer_id: int, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def delete_customer(customer_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
