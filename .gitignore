@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 webapp/password.txt
+webapp/secret_key.txt
 webapp/server.log
 webapp/access.log
 data/*.db-wal

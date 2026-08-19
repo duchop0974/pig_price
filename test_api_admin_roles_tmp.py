@@ -28,6 +28,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     app = create_app()
     app.config["TESTING"] = True
+    app.config["WTF_CSRF_ENABLED"] = False
     role_key = "test_role"
 
     with app.test_client() as client:

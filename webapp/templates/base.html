@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{% block title %}Quản lý bán heo{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 {% block extra_head %}{% endblock %}
@@ -55,6 +56,7 @@
       {% block topbar_actions_extra %}{% endblock %}
       {% if current_user %}<span class="current-user">{{ current_user.display_name }}</span>{% endif %}
       <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-ghost btn-sm">Đăng xuất</button>
       </form>
     </div>
@@ -114,6 +116,7 @@
   {% endblock %}
 </footer>
 
+<script src="{{ url_for('static', filename='js/core/csrf.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/status.js') }}"></script>

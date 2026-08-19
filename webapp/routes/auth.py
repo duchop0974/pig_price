@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from core import audit_actions
 from core.repositories import users_repo
 from core.services import authorization_service
-from extensions import BOOTSTRAP_PASSWORD_FILE, DB_PATH, db_lock, log_access, log_audit
+from extensions import BOOTSTRAP_PASSWORD_FILE, DB_PATH, db_lock, limiter, log_access, log_audit
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -97,6 +97,7 @@ def allowed_farm_ids(user: dict) -> list[int] | None:
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def login():
     error = None
     if request.method == "POST":

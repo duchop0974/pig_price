@@ -6,6 +6,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from flask import request, session
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from core.db import db_lock
 from core.repositories import audit_repo
@@ -39,6 +41,12 @@ if not _access_logger.handlers:
 # cập nhật lại quá dồn dập.
 refresh_state = {"last_run": None}
 REFRESH_COOLDOWN = timedelta(minutes=1)
+
+# Tạo trước (chưa gắn app) để routes/auth.py import và decorate route login()
+# ngay lúc module load — app_factory.py sẽ gọi limiter.init_app(app) sau khi
+# tạo Flask app. In-memory storage đủ dùng cho app chạy 1 máy (STEP 5 Security
+# Hardening, không cần Redis).
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 
 
 def log_access(event: str) -> None:
