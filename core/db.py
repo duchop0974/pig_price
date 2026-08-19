@@ -1101,9 +1101,14 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     """Mở kết nối SQLite, tạo bảng/index nếu chưa có. WAL giúp đọc và ghi
     không chặn lẫn nhau khi nhiều tiến trình (server + script CLI) cùng
     dùng chung 1 file .db."""
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA journal_mode=WAL;")
+
     conn.executescript(_DB_SCHEMA)
     _migrate(conn)
+
     return conn
