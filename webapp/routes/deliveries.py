@@ -8,11 +8,9 @@ from datetime import date
 
 from flask import Blueprint, jsonify, request, session
 
-from core import audit_actions
+from core.services import delivery_service
 from core import permissions as perm
 from data_access import (
-    create_delivery_locked,
-    delete_delivery_locked,
     get_delivery_locked,
     get_order_locked,
     get_plan_locked,
@@ -21,7 +19,7 @@ from data_access import (
     list_pig_types_locked,
     sum_delivered_for_plan_locked,
 )
-from extensions import log_audit
+from extensions import DB_PATH
 from routes.auth import allowed_farm_ids, permission_required
 
 deliveries_bp = Blueprint("deliveries", __name__)
@@ -118,7 +116,7 @@ def api_delivery_create(order_id: int, line_id: int):
         delivered_date = date.today().isoformat()
 
     username = session["user"]["username"]
-    delivery = create_delivery_locked(
+    delivery = delivery_service.create_delivery(
         line_id,
         {
             "pig_type_id": pig_type_id,
@@ -129,14 +127,7 @@ def api_delivery_create(order_id: int, line_id: int):
             "weighing_ref": (data.get("weighing_ref") or "").strip() or None,
             "note": (data.get("note") or "").strip() or None,
         },
-        request.remote_addr,
-        username,
-    )
-    log_audit(
-        audit_actions.DELIVERY_CREATE,
-        entity_type="sale_delivery",
-        entity_id=delivery["id"],
-        new_value={
+        {
             "plan_code": plan["plan_code"],
             "order_code": order.get("order_code"),
             "pig_type_id": pig_type_id,
@@ -144,6 +135,9 @@ def api_delivery_create(order_id: int, line_id: int):
             "total_weight_kg": total_weight_kg,
             "delivered_date": delivered_date,
         },
+        DB_PATH,
+        ip=request.remote_addr,
+        username=username,
     )
     return jsonify(delivery), 201
 
@@ -170,18 +164,9 @@ def api_delivery_delete(delivery_id: int):
     delivery = get_delivery_locked(delivery_id)
     if delivery is None:
         return jsonify({"error": "Không tìm thấy bản ghi xuất giao."}), 404
-    deleted, err = delete_delivery_locked(delivery_id)
+    deleted, err = delivery_service.delete_delivery(
+        delivery_id, delivery, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+    )
     if not deleted:
         return jsonify({"error": err}), 400
-    log_audit(
-        audit_actions.DELIVERY_DELETE,
-        entity_type="sale_delivery",
-        entity_id=delivery_id,
-        old_value={
-            "plan_code": delivery.get("plan_code"),
-            "pig_type_name": delivery.get("pig_type_name"),
-            "quantity": delivery.get("quantity"),
-            "delivered_date": delivery.get("delivered_date"),
-        },
-    )
     return jsonify({"ok": True})

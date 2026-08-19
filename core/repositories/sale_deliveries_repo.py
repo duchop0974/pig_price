@@ -80,9 +80,12 @@ def create_delivery(
     db_path: Path,
     ip: str | None = None,
     username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> dict:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             """
@@ -111,10 +114,24 @@ def create_delivery(
         )
         delivery_id = cur.lastrowid
         _sync_allocation_actuals(conn, allocation_id)
-        conn.commit()
+        if own_connection:
+            conn.commit()
+            return get_delivery(delivery_id, db_path)
+        # conn dùng chung, transaction NGOÀI (service layer) chưa commit —
+        # get_delivery() mở connection MỚI sẽ không thấy dòng vừa insert
+        # (WAL chỉ lộ dữ liệu đã commit cho connection khác). Đọc lại bằng
+        # CHÍNH conn, tự khôi phục row_factory sau khi dùng để không làm
+        # lệch state của conn dùng chung cho các lệnh khác trong transaction.
+        prev_row_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
+            row = conn.execute(_SELECT_JOINED + " WHERE sd.id = ?", (delivery_id,)).fetchone()
+        finally:
+            conn.row_factory = prev_row_factory
+        return dict(row) if row else None
     finally:
-        conn.close()
-    return get_delivery(delivery_id, db_path)
+        if own_connection:
+            conn.close()
 
 
 def get_delivery(delivery_id: int, db_path: Path) -> dict | None:
@@ -171,16 +188,22 @@ def list_deliveries_for_plan(sale_plan_id: int, db_path: Path) -> list[dict]:
         conn.close()
 
 
-def delete_delivery(delivery_id: int, db_path: Path) -> tuple[bool, str | None]:
+def delete_delivery(
+    delivery_id: int, db_path: Path, conn: sqlite3.Connection | None = None
+) -> tuple[bool, str | None]:
     """Trả (đã xoá, thông báo lỗi). Từ chối khi bản ghi đã Data Freeze —
     kiểm tra ở đây thay vì để trigger ABORT vì DELETE không bị
     trg_sale_deliveries_lock_guard chặn (trigger chỉ bắt BEFORE UPDATE)."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
+        prev_row_factory = conn.row_factory
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT allocation_id, locked_at FROM sale_deliveries WHERE id = ?", (delivery_id,)
         ).fetchone()
+        conn.row_factory = prev_row_factory
         if row is None:
             return False, "Không tìm thấy bản ghi xuất giao."
         if row["locked_at"]:
@@ -188,10 +211,12 @@ def delete_delivery(delivery_id: int, db_path: Path) -> tuple[bool, str | None]:
         allocation_id = row["allocation_id"]
         conn.execute("DELETE FROM sale_deliveries WHERE id = ?", (delivery_id,))
         _sync_allocation_actuals(conn, allocation_id)
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return True, None
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def sum_delivered_for_plan(sale_plan_id: int, db_path: Path) -> int:
