@@ -1,5 +1,6 @@
 """Kết nối SQLite dùng chung, schema + migration nhẹ (thêm cột/bảng nếu chưa có)."""
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -1096,6 +1097,27 @@ def _backfill_sale_deliveries(conn: sqlite3.Connection) -> None:
     finally:
         conn.isolation_level = old_isolation_level
 
+@contextmanager
+def transaction(conn: sqlite3.Connection):
+    """
+    Quản lý transaction cho một business operation.
+
+    Connection được tạo và đóng bởi caller.
+    Helper này chỉ chịu trách nhiệm BEGIN / COMMIT / ROLLBACK.
+    """
+    if conn.in_transaction:
+        # Đã có transaction bên ngoài.
+        # Không tự commit/rollback transaction của caller.
+        yield conn
+        return
+
+    try:
+        conn.execute("BEGIN")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
     """Mở kết nối SQLite, tạo bảng/index nếu chưa có. WAL giúp đọc và ghi
