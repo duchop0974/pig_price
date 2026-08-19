@@ -9,14 +9,11 @@ from core import audit_actions
 from core import permissions as perm
 from core.repositories.plan_reconciliation_repo import PHOTO_REQUIRED_KINDS, VALID_KINDS as RECONCILE_VALID_KINDS
 from core.scrapers.utils import normalize_province
-from core.services import plan_service
+from core.services import order_service, plan_service
 from data_access import (
-    add_order_line_locked,
     count_orders_for_customer_locked,
     create_customer_locked,
-    create_order_locked,
     delete_customer_locked,
-    delete_order_locked,
     export_order_quotation_excel_locked,
     export_orders_excel_locked,
     export_plans_excel_locked,
@@ -28,21 +25,14 @@ from data_access import (
     list_farms_locked,
     list_media_for_entity_locked,
     list_orders_locked,
-    lock_order_locked,
     list_pig_types_locked,
     list_plans_locked,
     list_reconciliations_for_plan_locked,
     list_zones_locked,
     load_df,
-    mark_order_done_locked,
-    remove_order_line_locked,
     save_media_upload_locked,
     set_customer_active_locked,
     update_customer_locked,
-    update_order_line_locked,
-    update_order_revenue_details_locked,
-    update_order_sale_details_locked,
-    update_order_status_locked,
 )
 from extensions import DB_PATH, log_audit
 from routes.auth import allowed_farm_ids, current_user_permissions, permission_required
@@ -776,13 +766,7 @@ def api_orders_create():
         return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
-    order_id = create_order_locked(validated, request.remote_addr, username)
-    log_audit(
-        audit_actions.ORDER_CREATE,
-        entity_type="sale_order",
-        entity_id=order_id,
-        new_value={"lines": validated},
-    )
+    order_id = order_service.create_order(validated, DB_PATH, ip=request.remote_addr, username=username)
     df = load_df()
     nat = national_price(df)
     order = get_order_locked(order_id)
@@ -803,13 +787,7 @@ def api_order_add_line(order_id: int):
         return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
-    line_id = add_order_line_locked(order_id, validated[0], request.remote_addr, username)
-    log_audit(
-        audit_actions.ORDER_LINE_ADD,
-        entity_type="sale_order",
-        entity_id=order_id,
-        new_value={"allocation_id": line_id, **validated[0]},
-    )
+    line_id = order_service.add_line(order_id, validated[0], DB_PATH, ip=request.remote_addr, username=username)
     df = load_df()
     nat = national_price(df)
     order = get_order_locked(order_id)
@@ -828,15 +806,9 @@ def api_order_remove_line(order_id: int, line_id: int):
         return jsonify({"error": "Đơn hàng phải có ít nhất 1 dòng."}), 400
 
     username = session["user"]["username"]
-    removed = remove_order_line_locked(order_id, line_id, request.remote_addr, username)
+    removed = order_service.remove_line(order_id, line_id, DB_PATH, ip=request.remote_addr, username=username)
     if not removed:
         return jsonify({"error": "Không tìm thấy dòng hàng."}), 404
-    log_audit(
-        audit_actions.ORDER_LINE_REMOVE,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={"allocation_id": line_id},
-    )
     df = load_df()
     nat = national_price(df)
     order = get_order_locked(order_id)
@@ -882,13 +854,8 @@ def api_order_edit_line(order_id: int, line_id: int):
         return jsonify({"error": "Không có dữ liệu để cập nhật."}), 400
 
     username = session["user"]["username"]
-    update_order_line_locked(line_id, request.remote_addr, username, fields)
-    log_audit(
-        audit_actions.ORDER_LINE_EDIT,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={"allocation_id": line_id, **{k: old_line.get(k) for k in fields}},
-        new_value={"allocation_id": line_id, **fields},
+    order_service.edit_line(
+        order_id, line_id, old_line, fields, DB_PATH, ip=request.remote_addr, username=username
     )
     df = load_df()
     nat = national_price(df)
@@ -908,13 +875,8 @@ def api_orders_update(order_id: int):
         return jsonify({"error": "Không tìm thấy đơn hàng."}), 404
 
     username = session["user"]["username"]
-    update_order_status_locked(order_id, status, request.remote_addr, username)
-    log_audit(
-        audit_actions.ORDER_UPDATE_STATUS,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={"status": old_order["status"]},
-        new_value={"status": status},
+    order_service.update_status(
+        order_id, status, old_order["status"], DB_PATH, ip=request.remote_addr, username=username
     )
     return jsonify({"ok": True})
 
@@ -929,19 +891,11 @@ def api_orders_delete(order_id: int):
         return jsonify({"error": "Không tìm thấy đơn hàng."}), 404
     if old_order.get("locked_at"):
         return jsonify({"error": "Đơn hàng đã khoá, không thể xoá."}), 400
-    deleted, reason = delete_order_locked(order_id)
+    deleted, reason = order_service.delete_order(
+        order_id, old_order, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+    )
     if not deleted:
         return jsonify({"error": reason or "Không thể xoá đơn hàng."}), 400
-    log_audit(
-        audit_actions.ORDER_DELETE,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={
-            "order_code": old_order["order_code"],
-            "status": old_order["status"],
-            "line_count": len(old_order["lines"]),
-        },
-    )
     return jsonify({"ok": True})
 
 
@@ -961,10 +915,11 @@ def api_orders_lock(order_id: int):
         return jsonify({"error": "Đơn hàng đã được khoá từ trước."}), 400
 
     username = session["user"]["username"]
-    locked = lock_order_locked(order_id, request.remote_addr, username)
+    locked = order_service.lock_order(
+        order_id, order["order_code"], DB_PATH, ip=request.remote_addr, username=username
+    )
     if not locked:
         return jsonify({"error": "Không thể khoá đơn hàng."}), 400
-    log_audit(audit_actions.ORDER_LOCK, entity_type="sale_order", entity_id=order_id, new_value={"order_code": order["order_code"]})
     order = get_order_locked(order_id)
     return jsonify(order)
 
@@ -1004,13 +959,7 @@ def api_orders_mark_done(order_id: int):
         return jsonify({"error": "Vui lòng nhập đủ giá/số lượng bán thực tế cho mọi dòng."}), 400
 
     username = session["user"]["username"]
-    mark_order_done_locked(order_id, line_actuals, request.remote_addr, username)
-    log_audit(
-        audit_actions.ORDER_MARK_DONE,
-        entity_type="sale_order",
-        entity_id=order_id,
-        new_value={"lines": line_actuals},
-    )
+    order_service.mark_done(order_id, line_actuals, DB_PATH, ip=request.remote_addr, username=username)
     return jsonify({"ok": True})
 
 
@@ -1064,13 +1013,8 @@ def api_orders_sale_details(order_id: int):
         return jsonify({"error": "Không có dữ liệu để cập nhật."}), 400
 
     username = session["user"]["username"]
-    update_order_sale_details_locked(order_id, request.remote_addr, username, fields)
-    log_audit(
-        audit_actions.ORDER_UPDATE_SALE_DETAILS,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={k: old_order.get(k) for k in fields},
-        new_value=fields,
+    order_service.update_sale_details(
+        order_id, old_order, fields, DB_PATH, ip=request.remote_addr, username=username
     )
     return jsonify({"ok": True})
 
@@ -1112,13 +1056,8 @@ def api_orders_revenue_details(order_id: int):
         return jsonify({"error": "Không có dữ liệu để cập nhật."}), 400
 
     username = session["user"]["username"]
-    update_order_revenue_details_locked(order_id, request.remote_addr, username, fields)
-    log_audit(
-        audit_actions.ORDER_UPDATE_REVENUE_DETAILS,
-        entity_type="sale_order",
-        entity_id=order_id,
-        old_value={k: old_order.get(k) for k in fields},
-        new_value=fields,
+    order_service.update_revenue_details(
+        order_id, old_order, fields, DB_PATH, ip=request.remote_addr, username=username
     )
     return jsonify({"ok": True})
 

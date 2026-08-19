@@ -1,22 +1,13 @@
 from pathlib import Path
 
-from core.db import db_lock, get_connection, transaction
+from core.db import run_in_transaction
 from core.repositories import audit_repo, plan_reconciliation_repo, sale_plans_repo
 from core import audit_actions
 
-
-def _write(db_path: Path, fn):
-    """Mở 1 connection, chạy `fn(conn)` trong 1 transaction (commit/rollback
-    tự động qua `transaction()`), đóng connection — khuôn dùng chung cho mọi
-    hàm service ghi dữ liệu bên dưới, tránh lặp lại with db_lock/try-finally
-    ở từng hàm."""
-    with db_lock:
-        conn = get_connection(db_path)
-        try:
-            with transaction(conn):
-                return fn(conn)
-        finally:
-            conn.close()
+# Alias nội bộ — giữ tên `_write` cũ trong toàn bộ file này để không phải
+# đổi lại mọi lời gọi bên dưới; helper thật giờ sống ở core/db.py để
+# order_service.py (và các service khác sau này) dùng chung, không lặp lại.
+_write = run_in_transaction
 
 
 def create_plan(

@@ -1121,6 +1121,22 @@ def transaction(conn: sqlite3.Connection):
         conn.rollback()
         raise
 
+
+def run_in_transaction(db_path: Path, fn):
+    """Mở 1 connection, khoá db_lock, chạy `fn(conn)` trong 1 transaction
+    (commit/rollback tự động qua `transaction()`), đóng connection — khuôn
+    dùng chung cho mọi service layer (plan_service.py, order_service.py...)
+    cần gộp nhiều lệnh ghi (repo write + audit log) vào 1 transaction atomic
+    thay vì mỗi lệnh tự mở/đóng connection + commit riêng."""
+    with db_lock:
+        conn = get_connection(db_path)
+        try:
+            with transaction(conn):
+                return fn(conn)
+        finally:
+            conn.close()
+
+
 def get_connection(db_path: Path) -> sqlite3.Connection:
     """Mở kết nối SQLite, tạo bảng/index nếu chưa có. WAL giúp đọc và ghi
     không chặn lẫn nhau khi nhiều tiến trình (server + script CLI) cùng
