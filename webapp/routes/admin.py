@@ -8,21 +8,17 @@ from flask import Blueprint, jsonify, render_template, request, session
 from core import audit_actions
 from core import permissions as perm
 from core.repositories import audit_repo, users_repo
-from core.services import user_service
+from core.services import farm_service, user_service
 from data_access import (
     count_plans_for_farm_locked,
     count_deliveries_for_pig_type_locked,
     count_plans_for_pig_type_locked,
     count_plans_for_zone_locked,
     count_users_with_role_locked,
-    create_farm_locked,
     create_pig_type_locked,
     create_role_locked,
-    create_zone_locked,
-    delete_farm_locked,
     delete_pig_type_locked,
     delete_role_locked,
-    delete_zone_locked,
     get_farm_locked,
     get_pig_type_locked,
     get_role_locked,
@@ -35,9 +31,7 @@ from data_access import (
     list_zones_locked,
     set_permissions_for_role_locked,
     set_pig_type_active_locked,
-    update_farm_locked,
     update_pig_type_locked,
-    update_zone_locked,
 )
 from extensions import DB_PATH, db_lock, log_audit
 from routes.auth import permission_required
@@ -238,14 +232,7 @@ def api_admin_farms_create():
         return jsonify({"error": "Tên tỉnh quá dài."}), 400
     if any(f["code"] == code for f in list_farms_locked()):
         return jsonify({"error": "Mã trang trại đã tồn tại."}), 400
-    create_farm_locked(code, province)
-    new_farm = next((f for f in list_farms_locked() if f["code"] == code), None)
-    log_audit(
-        audit_actions.FARM_CREATE,
-        entity_type="farm",
-        entity_id=new_farm["id"] if new_farm else code,
-        new_value={"code": code, "province": province},
-    )
+    farm_service.create_farm(code, province, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_farms_locked()), 201
 
 
@@ -264,13 +251,8 @@ def api_admin_farms_update(farm_id: int):
         return jsonify({"error": "Tên tỉnh quá dài."}), 400
     if any(f["code"] == code and f["id"] != farm_id for f in list_farms_locked()):
         return jsonify({"error": "Mã trang trại đã tồn tại."}), 400
-    update_farm_locked(farm_id, code, province)
-    log_audit(
-        audit_actions.FARM_UPDATE,
-        entity_type="farm",
-        entity_id=farm_id,
-        old_value={"code": old_farm["code"], "province": old_farm["province"]},
-        new_value={"code": code, "province": province},
+    farm_service.update_farm(
+        farm_id, code, province, old_farm, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_farms_locked())
 
@@ -283,13 +265,7 @@ def api_admin_farms_delete(farm_id: int):
         return jsonify({"error": "Không tìm thấy trang trại."}), 404
     if count_plans_for_farm_locked(farm_id) > 0:
         return jsonify({"error": "Không thể xóa: trang trại đang được dùng trong kế hoạch xuất bán."}), 400
-    delete_farm_locked(farm_id)
-    log_audit(
-        audit_actions.FARM_DELETE,
-        entity_type="farm",
-        entity_id=farm_id,
-        old_value={"code": old_farm["code"], "province": old_farm["province"]},
-    )
+    farm_service.delete_farm(farm_id, old_farm, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_farms_locked())
 
 
@@ -308,14 +284,7 @@ def api_admin_zones_create():
         return jsonify({"error": "Vui lòng nhập tên khu hợp lệ."}), 400
     if any(z["code"] == code for z in list_zones_locked(farm_id)):
         return jsonify({"error": "Tên khu đã tồn tại trong trang trại này."}), 400
-    create_zone_locked(farm_id, code)
-    new_zone = next((z for z in list_zones_locked(farm_id) if z["code"] == code), None)
-    log_audit(
-        audit_actions.ZONE_CREATE,
-        entity_type="zone",
-        entity_id=new_zone["id"] if new_zone else code,
-        new_value={"farm_id": farm_id, "code": code},
-    )
+    farm_service.create_zone(farm_id, code, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_zones_locked(farm_id)), 201
 
 
@@ -331,14 +300,7 @@ def api_admin_zones_update(zone_id: int):
         return jsonify({"error": "Tên khu không hợp lệ."}), 400
     if any(z["code"] == code and z["id"] != zone_id for z in list_zones_locked(zone["farm_id"])):
         return jsonify({"error": "Tên khu đã tồn tại trong trang trại này."}), 400
-    update_zone_locked(zone_id, code)
-    log_audit(
-        audit_actions.ZONE_UPDATE,
-        entity_type="zone",
-        entity_id=zone_id,
-        old_value={"code": zone["code"]},
-        new_value={"code": code},
-    )
+    farm_service.update_zone(zone_id, code, zone, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_zones_locked(zone["farm_id"]))
 
 
@@ -350,13 +312,7 @@ def api_admin_zones_delete(zone_id: int):
         return jsonify({"error": "Không tìm thấy khu."}), 404
     if count_plans_for_zone_locked(zone_id) > 0:
         return jsonify({"error": "Không thể xóa: khu đang được dùng trong kế hoạch xuất bán."}), 400
-    delete_zone_locked(zone_id)
-    log_audit(
-        audit_actions.ZONE_DELETE,
-        entity_type="zone",
-        entity_id=zone_id,
-        old_value={"farm_id": zone["farm_id"], "code": zone["code"]},
-    )
+    farm_service.delete_zone(zone_id, zone, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_zones_locked(zone["farm_id"]))
 
 
