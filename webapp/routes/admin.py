@@ -8,16 +8,14 @@ from flask import Blueprint, jsonify, render_template, request, session
 from core import audit_actions
 from core import permissions as perm
 from core.repositories import audit_repo, users_repo
-from core.services import farm_service, user_service
+from core.services import farm_service, pig_type_service, user_service
 from data_access import (
     count_plans_for_farm_locked,
     count_deliveries_for_pig_type_locked,
     count_plans_for_pig_type_locked,
     count_plans_for_zone_locked,
     count_users_with_role_locked,
-    create_pig_type_locked,
     create_role_locked,
-    delete_pig_type_locked,
     delete_role_locked,
     get_farm_locked,
     get_pig_type_locked,
@@ -30,8 +28,6 @@ from data_access import (
     list_roles_locked,
     list_zones_locked,
     set_permissions_for_role_locked,
-    set_pig_type_active_locked,
-    update_pig_type_locked,
 )
 from extensions import DB_PATH, db_lock, log_audit
 from routes.auth import permission_required
@@ -341,13 +337,7 @@ def api_admin_pig_types_create():
         return jsonify({"error": "Tên loại heo không hợp lệ."}), 400
     if any(pt["code"] == code for pt in list_pig_types_locked()):
         return jsonify({"error": "Mã loại heo đã tồn tại."}), 400
-    pig_type_id = create_pig_type_locked(code, name)
-    log_audit(
-        audit_actions.PIG_TYPE_CREATE,
-        entity_type="pig_type",
-        entity_id=pig_type_id,
-        new_value={"code": code, "name": name},
-    )
+    pig_type_service.create_pig_type(code, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(list_pig_types_locked()), 201
 
 
@@ -366,13 +356,8 @@ def api_admin_pig_types_update(pig_type_id: int):
         return jsonify({"error": "Tên loại heo không hợp lệ."}), 400
     if any(pt["code"] == code and pt["id"] != pig_type_id for pt in list_pig_types_locked()):
         return jsonify({"error": "Mã loại heo đã tồn tại."}), 400
-    update_pig_type_locked(pig_type_id, code, name)
-    log_audit(
-        audit_actions.PIG_TYPE_UPDATE,
-        entity_type="pig_type",
-        entity_id=pig_type_id,
-        old_value={"code": old_pig_type["code"], "name": old_pig_type["name"]},
-        new_value={"code": code, "name": name},
+    pig_type_service.update_pig_type(
+        pig_type_id, code, name, old_pig_type, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_pig_types_locked())
 
@@ -384,11 +369,8 @@ def api_admin_pig_types_toggle(pig_type_id: int):
         return jsonify({"error": "Không tìm thấy loại heo."}), 404
     data = request.get_json(silent=True) or {}
     is_active = bool(data.get("is_active"))
-    set_pig_type_active_locked(pig_type_id, is_active)
-    log_audit(
-        audit_actions.PIG_TYPE_ACTIVATE if is_active else audit_actions.PIG_TYPE_DEACTIVATE,
-        entity_type="pig_type",
-        entity_id=pig_type_id,
+    pig_type_service.set_active(
+        pig_type_id, is_active, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_pig_types_locked())
 
@@ -408,12 +390,8 @@ def api_admin_pig_types_delete(pig_type_id: int):
         return jsonify(
             {"error": "Không thể xóa: loại heo đang được dùng trong kế hoạch xuất bán hoặc bản ghi xuất giao."}
         ), 400
-    delete_pig_type_locked(pig_type_id)
-    log_audit(
-        audit_actions.PIG_TYPE_DELETE,
-        entity_type="pig_type",
-        entity_id=pig_type_id,
-        old_value={"code": old_pig_type["code"], "name": old_pig_type["name"]},
+    pig_type_service.delete_pig_type(
+        pig_type_id, old_pig_type, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_pig_types_locked())
 

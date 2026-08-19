@@ -22,28 +22,38 @@ def list_pig_types(db_path: Path, active_only: bool = False) -> list[dict]:
         conn.close()
 
 
-def create_pig_type(code: str, name: str, db_path: Path) -> int:
-    conn = get_connection(db_path)
+def create_pig_type(code: str, name: str, db_path: Path, conn: sqlite3.Connection | None = None) -> int:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             "INSERT INTO pig_types (code, name, is_active, created_at) VALUES (?, ?, 1, ?)",
             (code, name, datetime.now().isoformat(timespec="seconds")),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.lastrowid
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def set_pig_type_active(pig_type_id: int, is_active: bool, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def set_pig_type_active(
+    pig_type_id: int, is_active: bool, db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE pig_types SET is_active = ? WHERE id = ?", (1 if is_active else 0, pig_type_id)
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_pig_type(pig_type_id: int, db_path: Path) -> dict | None:
@@ -59,21 +69,31 @@ def get_pig_type(pig_type_id: int, db_path: Path) -> dict | None:
         conn.close()
 
 
-def update_pig_type(pig_type_id: int, code: str, name: str, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def update_pig_type(
+    pig_type_id: int, code: str, name: str, db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE pig_types SET code = ?, name = ? WHERE id = ?", (code, name, pig_type_id)
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_pig_type(pig_type_id: int, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def delete_pig_type(pig_type_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM pig_types WHERE id = ?", (pig_type_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
