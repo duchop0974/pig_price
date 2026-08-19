@@ -1230,7 +1230,32 @@ transaction; (2) module nào tự `from extensions import DB_PATH` ở top
 level (import bởi `app_factory.py` cũng ở top level, không phải lazy
 trong `create_app()`) thì test phải patch `DB_PATH` riêng trên module đó
 (`routes.admin.DB_PATH = test_db`, không chỉ `extensions.DB_PATH`) — patch
-timing, không phải bug thật.
+timing, không phải bug thật. `webapp/routes/auth.py` cũng dính lớp bug
+này (`current_user_permissions()` dùng `DB_PATH` module-level), nhưng
+mãi tới khi viết test cho STEP 3 (farm-scope, dưới đây) mới lộ ra — mọi
+test trước luôn dùng session role `admin`, escape hatch hardcode
+`admin` = full quyền trong `roles_repo.effective_permissions` không phụ
+thuộc DB nên che mất bug.
+
+**STEP 3 — Authorization + Data Scope (2026-08-19)**: rà soát toàn bộ
+route ghi trên `sale_plans`/reconciliation/delivery (nơi duy nhất tài
+khoản vai trò `farm` thao tác — `sale_allocations`/đơn hàng là domain
+sales/accounting, không scope theo farm, xác nhận đúng thiết kế) thì
+thấy **6/10 hành động không kiểm tra farm-scope** dù thao tác trên 1 bản
+ghi cụ thể có `farm_id`, chỉ dựa vào permission gate
+(`@permission_required`) — 1 admin lỡ cấp nhầm 1 trong các quyền
+`plans.review`/`plans.delete`/`plans.reconcile_delete`/
+`plans.delivery_delete` cho role `farm` qua `/admin/permissions` (chưa
+xảy ra trong DB thật, đã xác nhận) sẽ khiến user vai trò farm thao tác
+được trên **bất kỳ trại nào**, không chỉ trại được gán. Đã thêm guard
+`allowed_farm_ids()` (khuôn có sẵn, lặp lại y hệt) vào
+`api_plans_approve`/`api_plans_reject`/`api_plans_update`/
+`api_plans_delete`/`api_plan_reconciliation_delete` (`plans.py`) và
+`api_delivery_delete` (`deliveries.py`) — thuần route layer, không đổi
+service/repository/permission catalog/UI. Verify bằng
+`test_api_farm_scope_tmp.py`: cấp tạm 4 quyền trên cho role `farm` trên
+DB test, mô phỏng đúng tình huống rủi ro với 2 tài khoản farm (đúng/sai
+trại).
 
 ---
 
