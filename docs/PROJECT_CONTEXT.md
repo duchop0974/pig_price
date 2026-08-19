@@ -1257,6 +1257,43 @@ service/repository/permission catalog/UI. Verify bằng
 DB test, mô phỏng đúng tình huống rủi ro với 2 tài khoản farm (đúng/sai
 trại).
 
+### 8. STEP 5 — Security Hardening (2026-08-19)
+
+7 hạng mục P0 theo mục 17 tài liệu refactor. Đã xác nhận với người dùng:
+app có cả truy cập LAN trực tiếp (HTTP) lẫn qua Cloudflare Tunnel
+(HTTPS) → không thể ép `Secure` cookie vô điều kiện; đồng ý thêm
+`flask-wtf`/`flask-limiter`; secret key lưu file cục bộ gitignore.
+
+- **Secret key bền vững**: trước đây `secrets.token_hex(32)` sinh random
+  mỗi lần khởi động (mọi phiên mất hiệu lực khi restart) — nay đọc/tạo
+  từ `webapp/secret_key.txt` (gitignore, khớp cách `webapp/password.txt`
+  đang làm).
+- **Session cookie**: `HTTPONLY=True`, `SAMESITE=Lax` (an toàn cả LAN
+  lẫn Tunnel); `SECURE` tuỳ biến qua env `SESSION_COOKIE_SECURE=1`, mặc
+  định `False` — nếu sau này khẳng định 100% truy cập qua Tunnel HTTPS,
+  chỉ cần set biến môi trường, không cần sửa code.
+- **CSRF**: `CSRFProtect(app)` (flask-wtf) bảo vệ toàn bộ route ghi tự
+  động. Thay vì sửa tay 66+ lệnh `fetch()` rải rác ở 10 file JS
+  (`plan.js`/`allocation.js`/`admin_*.js`...), dùng 1 file mới
+  `webapp/static/js/core/csrf.js` **monkey-patch `window.fetch` toàn
+  cục** (đọc token từ `<meta name="csrf-token">`, tự thêm header
+  `X-CSRFToken` cho mọi request same-origin) — nạp trước `core/api.js`
+  trong `base.html`, không `defer` (đúng quy ước thứ tự script ở mục
+  I.6). Nhờ vậy không cần sửa dòng nào ở 10 file JS domain hiện có. 2
+  form HTML thường (`login.html`, form đăng xuất trong `base.html`)
+  thêm `{{ csrf_token() }}` hidden field riêng.
+- **Login rate limiting**: `flask-limiter` (in-memory, đủ 1 máy),
+  `@limiter.limit("10 per minute")` trên route `login()`.
+- **Test client**: 9 `test_api_*_tmp.py` phải thêm
+  `app.config["WTF_CSRF_ENABLED"] = False` (test client gọi thẳng
+  `client.post(json=...)`, không qua `fetch()`/`csrf.js` nên không có
+  token).
+- **Ngoài phạm vi** (có lý do, xem plan lúc thực hiện): không sửa
+  `ProxyFix` (rủi ro còn lại chỉ ảnh hưởng độ chính xác IP trong
+  `audit_log`, không bypass auth/permission/data-scope); không thêm
+  session timeout (quyết định UX, chưa hỏi); không migrate 66 `fetch()`
+  sang dùng `core/api.js` (nằm ngoài phạm vi CSRF).
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng
