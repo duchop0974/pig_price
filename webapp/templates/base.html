@@ -64,6 +64,42 @@
 
 <main>
 {% block breadcrumb %}{% endblock %}
+
+{% if request.endpoint in ['plans.plans_page', 'plans.allocations_page', 'plans.doi_soat_page'] %}
+<nav class="process-nav" aria-label="Điều hướng quy trình bán heo">
+
+  <a class="process-nav-back"
+     href="{{ url_for('dashboard.quy_trinh') }}">
+    ← Sơ đồ quy trình
+  </a>
+
+  <span class="process-nav-divider"></span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}"
+     href="{{ url_for('plans.plans_page') }}">
+    <span class="process-nav-number">1</span>
+    Kế hoạch trại
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}"
+     href="{{ url_for('plans.allocations_page') }}">
+    <span class="process-nav-number">2</span>
+    Bán & xuất
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}"
+     href="{{ url_for('plans.doi_soat_page') }}">
+    <span class="process-nav-number">3</span>
+    Đối soát
+  </a>
+
+</nav>
+{% endif %}
+
 {% block page_header %}{% endblock %}
 {% block content %}{% endblock %}
 </main>

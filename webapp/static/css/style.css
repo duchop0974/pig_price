@@ -1168,6 +1168,119 @@ footer p { margin: 0.15rem 0; }
 .breadcrumb .breadcrumb-sep { color: var(--border); }
 .breadcrumb .breadcrumb-current { color: var(--text); font-weight: 600; }
 
+/* ---------------------------------------------------------------------- */
+/* Process navigation                                                     */
+/* ---------------------------------------------------------------------- */
+
+.process-nav {
+  max-width: 960px;
+  margin: 10px auto 0;
+  padding: 0 16px;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.process-nav-back,
+.process-nav-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  min-height: 36px;
+  padding: 6px 10px;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+
+  text-decoration: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+
+  background: var(--surface);
+  color: var(--muted);
+
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.process-nav-back {
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  border-color: #c9e4f4;
+}
+
+.process-nav-back:hover {
+  background: #dceff9;
+}
+
+.process-nav-step:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.process-nav-step.is-active {
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.process-nav-number {
+  width: 22px;
+  height: 22px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: var(--surface-muted);
+  color: var(--muted);
+
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.process-nav-step.is-active .process-nav-number {
+  background: var(--primary);
+  color: #fff;
+}
+
+.process-nav-divider {
+  width: 1px;
+  height: 24px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.process-nav-arrow {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .process-nav {
+    padding: 0 10px;
+    margin-top: 8px;
+  }
+
+  .process-nav-back,
+  .process-nav-step {
+    flex-shrink: 0;
+  }
+
+  .process-nav-arrow {
+    flex-shrink: 0;
+  }
+}
+
 /* Page header */
 .page-header {
   display: flex;
