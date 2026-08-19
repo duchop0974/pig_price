@@ -164,6 +164,10 @@ def api_delivery_delete(delivery_id: int):
     delivery = get_delivery_locked(delivery_id)
     if delivery is None:
         return jsonify({"error": "Không tìm thấy bản ghi xuất giao."}), 404
+    plan = get_plan_locked(delivery["sale_plan_id"])
+    farm_ids = allowed_farm_ids(session["user"])
+    if plan is not None and farm_ids is not None and plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
     deleted, err = delivery_service.delete_delivery(
         delivery_id, delivery, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )

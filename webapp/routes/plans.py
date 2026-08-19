@@ -310,6 +310,9 @@ def api_plans_approve(plan_id: int):
         return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
     if old_plan["status"] != "pending_approval":
         return jsonify({"error": "Kế hoạch không ở trạng thái chờ duyệt."}), 400
+    farm_ids = allowed_farm_ids(session["user"])
+    if farm_ids is not None and old_plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     username = session["user"]["username"]
     plan_service.approve_plan(plan_id, DB_PATH, ip=request.remote_addr, username=username)
@@ -328,6 +331,9 @@ def api_plans_reject(plan_id: int):
         return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
     if old_plan["status"] != "pending_approval":
         return jsonify({"error": "Kế hoạch không ở trạng thái chờ duyệt."}), 400
+    farm_ids = allowed_farm_ids(session["user"])
+    if farm_ids is not None and old_plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     username = session["user"]["username"]
     plan_service.reject_plan(plan_id, reason, DB_PATH, ip=request.remote_addr, username=username)
@@ -348,6 +354,9 @@ def api_plans_update(plan_id: int):
         return jsonify({"error": "Chỉ dùng chức năng Duyệt/Từ chối để xử lý kế hoạch đang chờ duyệt."}), 400
     if status == "approved" and old_plan["status"] != "disabled":
         return jsonify({"error": "Chỉ dùng chức năng Duyệt để chuyển kế hoạch từ Chờ duyệt sang Đã duyệt."}), 400
+    farm_ids = allowed_farm_ids(session["user"])
+    if farm_ids is not None and old_plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     username = session["user"]["username"]
     plan_service.update_plan_status(
@@ -480,6 +489,9 @@ def api_plans_delete(plan_id: int):
     old_plan = get_plan_locked(plan_id)
     if old_plan is None:
         return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
+    farm_ids = allowed_farm_ids(session["user"])
+    if farm_ids is not None and old_plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
     deleted = plan_service.delete_plan(
         plan_id, old_plan, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
@@ -579,6 +591,10 @@ def api_plan_reconciliation_delete(reconciliation_id: int):
     reconciliation = get_reconciliation_locked(reconciliation_id)
     if reconciliation is None:
         return jsonify({"error": "Không tìm thấy bản ghi."}), 404
+    plan = get_plan_locked(reconciliation["sale_plan_id"])
+    farm_ids = allowed_farm_ids(session["user"])
+    if plan is not None and farm_ids is not None and plan["farm_id"] not in farm_ids:
+        return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
     plan_service.delete_reconciliation(
         reconciliation_id, reconciliation, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
