@@ -9,13 +9,13 @@ from core import audit_actions
 from core import permissions as perm
 from core.repositories.plan_reconciliation_repo import PHOTO_REQUIRED_KINDS, VALID_KINDS as RECONCILE_VALID_KINDS
 from core.scrapers.utils import normalize_province
+from core.services import plan_service
 from data_access import (
     add_order_line_locked,
     approve_plan_locked,
     count_orders_for_customer_locked,
     create_customer_locked,
     create_order_locked,
-    create_plan_locked,
     create_plan_reconciliation_locked,
     delete_customer_locked,
     delete_order_locked,
@@ -52,7 +52,7 @@ from data_access import (
     update_plan_status_locked,
     update_sale_plan_edit_locked,
 )
-from extensions import log_audit
+from extensions import DB_PATH, log_audit
 from routes.auth import allowed_farm_ids, current_user_permissions, permission_required
 from routes.incidents import _validate_photo
 
@@ -297,7 +297,12 @@ def api_plans_create():
         return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
-    plan_id = create_plan_locked(
+    # Tạo kế hoạch + ghi audit trong CÙNG 1 transaction (STEP 2 Service
+    # Layer + STEP 4 Transaction Standardization theo
+    # PIG_PRICE_ENTERPRISE_REFACTOR_CONTEXT.md) — trước đây 2 bước này tách
+    # rời (create_plan_locked rồi log_audit riêng), nếu bước audit lỗi thì
+    # kế hoạch đã tạo nhưng mất vết audit.
+    plan_id = plan_service.create_plan(
         {
             "planned_date": planned_date,
             "farm_id": farm_id,
@@ -309,22 +314,9 @@ def api_plans_create():
             "expected_avg_weight_kg": expected_avg_weight_kg,
             "note": note,
         },
-        request.remote_addr,
-        username,
-    )
-    log_audit(
-        audit_actions.PLAN_CREATE,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        new_value={
-            "planned_date": planned_date,
-            "farm_id": farm_id,
-            "zone_id": zone_id,
-            "shed": shed,
-            "lot": lot,
-            "pig_type_id": pig_type_id,
-            "quantity": quantity,
-        },
+        DB_PATH,
+        ip=request.remote_addr,
+        username=username,
     )
     df = load_df()
     nat = national_price(df)

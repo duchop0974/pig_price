@@ -330,17 +330,49 @@ def _next_plan_code(conn: sqlite3.Connection, farm_id: int, planned_date: str) -
         seq += 1
 
 
-def create_sale_plan(plan: dict, db_path: Path, ip: str | None = None, username: str | None = None) -> int:
+def create_sale_plan(
+    plan: dict,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> int:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
+
     try:
-        plan_code = _next_plan_code(conn, plan["farm_id"], plan["planned_date"])
+        plan_code = _next_plan_code(
+            conn,
+            plan["farm_id"],
+            plan["planned_date"],
+        )
+
         cur = conn.execute(
             """
-            INSERT INTO sale_plans (plan_code, planned_date, farm_id, zone_id, shed, lot, pig_type_id, quantity,
-                                     expected_avg_weight_kg, note, status, created_at, created_ip, created_by,
-                                     updated_at, updated_ip, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?)
+            INSERT INTO sale_plans (
+                plan_code,
+                planned_date,
+                farm_id,
+                zone_id,
+                shed,
+                lot,
+                pig_type_id,
+                quantity,
+                expected_avg_weight_kg,
+                note,
+                status,
+                created_at,
+                created_ip,
+                created_by,
+                updated_at,
+                updated_ip,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval',
+                    ?, ?, ?, ?, ?, ?)
             """,
             (
                 plan_code,
@@ -361,10 +393,15 @@ def create_sale_plan(plan: dict, db_path: Path, ip: str | None = None, username:
                 username,
             ),
         )
-        conn.commit()
+
+        if own_connection:
+            conn.commit()
+
         return cur.lastrowid
+
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_sale_plan(plan_id: int, db_path: Path) -> dict | None:

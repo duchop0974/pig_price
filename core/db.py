@@ -1,5 +1,6 @@
 """Kết nối SQLite dùng chung, schema + migration nhẹ (thêm cột/bảng nếu chưa có)."""
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -1097,6 +1098,7 @@ def _backfill_sale_deliveries(conn: sqlite3.Connection) -> None:
     finally:
         conn.isolation_level = old_isolation_level
 
+db_lock = threading.Lock()
 @contextmanager
 def transaction(conn: sqlite3.Connection):
     """

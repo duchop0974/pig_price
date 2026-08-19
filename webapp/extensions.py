@@ -1,13 +1,13 @@
 """Trạng thái/tài nguyên dùng chung giữa các blueprint: khoá DB, đường dẫn
 file, ghi log truy cập & nhật ký hoạt động."""
 import logging
-import threading
 from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from flask import request, session
 
+from core.db import db_lock
 from core.repositories import audit_repo
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,8 +33,6 @@ if not _access_logger.handlers:
     _handler = RotatingFileHandler(ACCESS_LOG_PATH, maxBytes=5_000_000, backupCount=3, encoding="utf-8")
     _handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%d/%m/%Y %H:%M:%S"))
     _access_logger.addHandler(_handler)
-
-db_lock = threading.Lock()
 
 # Trạng thái lần cập nhật giá gần nhất — dùng chung giữa nút "Cập nhật giá hôm
 # nay" (routes/prices.py) và cron 7h sáng (scheduler.py) để không cho phép

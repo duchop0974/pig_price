@@ -21,12 +21,27 @@ def log_action(
     entity_id: int | str | None = None,
     old_value: dict | None = None,
     new_value: dict | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+
+    if own_connection:
+        conn = get_connection(db_path)
+
     try:
         conn.execute(
             """
-            INSERT INTO audit_log (at, username, action, entity_type, entity_id, old_value, new_value, detail, ip)
+            INSERT INTO audit_log (
+                at,
+                username,
+                action,
+                entity_type,
+                entity_id,
+                old_value,
+                new_value,
+                detail,
+                ip
+            )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -41,9 +56,13 @@ def log_action(
                 ip,
             ),
         )
-        conn.commit()
+
+        if own_connection:
+            conn.commit()
+
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def list_audit_log(
