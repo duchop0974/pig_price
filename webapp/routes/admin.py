@@ -8,8 +8,8 @@ from flask import Blueprint, jsonify, render_template, request, session
 from core import audit_actions
 from core import permissions as perm
 from core.repositories import audit_repo, users_repo
+from core.services import user_service
 from data_access import (
-    assign_user_farms_locked,
     count_plans_for_farm_locked,
     count_deliveries_for_pig_type_locked,
     count_plans_for_pig_type_locked,
@@ -22,7 +22,6 @@ from data_access import (
     delete_farm_locked,
     delete_pig_type_locked,
     delete_role_locked,
-    delete_user_locked,
     delete_zone_locked,
     get_farm_locked,
     get_pig_type_locked,
@@ -38,7 +37,6 @@ from data_access import (
     set_pig_type_active_locked,
     update_farm_locked,
     update_pig_type_locked,
-    update_user_role_locked,
     update_zone_locked,
 )
 from extensions import DB_PATH, db_lock, log_audit
@@ -74,14 +72,14 @@ def api_admin_users_create():
     if users_repo.get_user_by_username(username, DB_PATH):
         return jsonify({"error": "Tên đăng nhập đã tồn tại."}), 400
 
-    with db_lock:
-        user_id = users_repo.create_user(username, password, DB_PATH, display_name=display_name, role=role)
-    log_audit(
-        audit_actions.USER_CREATE,
-        detail=f"username={username}, role={role}",
-        entity_type="user",
-        entity_id=user_id,
-        new_value={"username": username, "display_name": display_name, "role": role},
+    user_id = user_service.create_user(
+        username,
+        password,
+        display_name,
+        role,
+        DB_PATH,
+        ip=request.remote_addr,
+        actor_username=session["user"]["username"],
     )
     return jsonify(users_repo.list_users(DB_PATH)), 201
 
@@ -98,13 +96,8 @@ def api_admin_users_update_role(user_id: int):
     old_user = next((u for u in users if u["id"] == user_id), None)
     if old_user is None:
         return jsonify({"error": "Không tìm thấy tài khoản."}), 404
-    update_user_role_locked(user_id, role)
-    log_audit(
-        audit_actions.USER_UPDATE_ROLE,
-        entity_type="user",
-        entity_id=user_id,
-        old_value={"role": old_user["role"]},
-        new_value={"role": role},
+    user_service.update_role(
+        user_id, role, old_user["role"], DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(users_repo.list_users(DB_PATH))
 
@@ -131,13 +124,8 @@ def api_admin_users_farms_update(user_id: int):
         return jsonify({"error": "Có trang trại không tồn tại trong danh sách chọn."}), 400
 
     old_ids = [f["id"] for f in list_farms_for_user_locked(user_id)]
-    assign_user_farms_locked(user_id, farm_ids)
-    log_audit(
-        audit_actions.USER_ASSIGN_FARMS,
-        entity_type="user",
-        entity_id=user_id,
-        old_value={"farm_ids": old_ids},
-        new_value={"farm_ids": farm_ids},
+    user_service.assign_farms(
+        user_id, farm_ids, old_ids, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(list_farms_for_user_locked(user_id))
 
@@ -147,12 +135,8 @@ def api_admin_users_farms_update(user_id: int):
 def api_admin_users_toggle(user_id: int):
     data = request.get_json(silent=True) or {}
     is_active = bool(data.get("is_active"))
-    with db_lock:
-        users_repo.set_user_active(user_id, is_active, DB_PATH)
-    log_audit(
-        audit_actions.USER_ACTIVATE if is_active else audit_actions.USER_DEACTIVATE,
-        entity_type="user",
-        entity_id=user_id,
+    user_service.set_active(
+        user_id, is_active, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(users_repo.list_users(DB_PATH))
 
@@ -164,9 +148,9 @@ def api_admin_users_reset_password(user_id: int):
     password = data.get("password") or ""
     if len(password) < 6:
         return jsonify({"error": "Mật khẩu cần tối thiểu 6 ký tự."}), 400
-    with db_lock:
-        users_repo.reset_password(user_id, password, DB_PATH)
-    log_audit(audit_actions.USER_RESET_PASSWORD, entity_type="user", entity_id=user_id)
+    user_service.reset_password(
+        user_id, password, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+    )
     return jsonify({"ok": True})
 
 
@@ -185,12 +169,8 @@ def api_admin_users_delete(user_id: int):
         ]
         if not other_active_admins:
             return jsonify({"error": "Không thể xoá: đây là tài khoản admin đang hoạt động cuối cùng."}), 400
-    delete_user_locked(user_id)
-    log_audit(
-        audit_actions.USER_DELETE,
-        entity_type="user",
-        entity_id=user_id,
-        old_value={"username": old_user["username"], "display_name": old_user["display_name"], "role": old_user["role"]},
+    user_service.delete_user(
+        user_id, old_user, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(users_repo.list_users(DB_PATH))
 
