@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Đối soát{% endblock %}
+{% block brand_title %}⚖️ Đối soát{% endblock %}
+{% block brand_sub %}Kế hoạch trại — kế hoạch so với thực tế bán{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Đối soát</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">⚖️ Đối soát</h1>
+    <p class="page-header-desc">Toàn bộ kế hoạch trại — lọc theo trạng thái đối soát để xử lý chênh lệch</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="kpi-grid">
+      <div class="kpi-tile kpi-approved">
+        <div class="kpi-label">Cần đối soát</div>
+        <div class="kpi-value" id="ds-count-needs">—<span class="unit">kế hoạch</span></div>
+      </div>
+      <div class="kpi-tile kpi-pending">
+        <div class="kpi-label">Đang trong hạn</div>
+        <div class="kpi-value" id="ds-count-progress">—<span class="unit">kế hoạch</span></div>
+      </div>
+      <div class="kpi-tile kpi-sold">
+        <div class="kpi-label">Đã đối soát</div>
+        <div class="kpi-value" id="ds-count-done">—<span class="unit">kế hoạch</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card plan-list-section">
+    <div class="section-head">
+      <h2>Danh sách kế hoạch</h2>
+    </div>
+    <div class="filter-bar">
+      <div class="control-row">
+        <select id="ds-filter-farm"><option value="">Tất cả trại</option></select>
+        <select id="ds-filter-pig-type"><option value="">Tất cả loại heo</option></select>
+        <input type="date" id="ds-filter-date-from" title="Ngày dự kiến từ">
+        <input type="date" id="ds-filter-date-to" title="Ngày dự kiến đến">
+        <select id="ds-filter-status">
+          <option value="open" selected>Cần xử lý (chưa đối soát xong)</option>
+          <option value="needs_reconciliation">Cần đối soát</option>
+          <option value="in_progress">Đang trong hạn</option>
+          <option value="reconciled">Đã đối soát</option>
+          <option value="over_delivered">Xuất vượt kế hoạch</option>
+          <option value="all">Tất cả</option>
+        </select>
+        <input type="text" id="ds-filter-search" placeholder="Tìm trại, mã kế hoạch, ghi chú...">
+      </div>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table admin-table-responsive">
+        <thead>
+          <tr>
+            <th>Mã kế hoạch</th>
+            <th>Trại</th>
+            <th>Loại heo</th>
+            <th>Ngày dự kiến</th>
+            <th>Kế hoạch</th>
+            <th>Đã bán</th>
+            <th>Chưa xử lý</th>
+            <th>Trạng thái</th>
+            <th>Ghi chú</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="doi-soat-list"></tbody>
+      </table>
+    </div>
+    <p id="doi-soat-empty" class="msg hidden">Không có kế hoạch nào khớp bộ lọc.</p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};
+  window.CURRENT_USER_ROLE = "{{ current_user.role }}";
+</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/doi_soat.js') }}"></script>
+{% endblock %}

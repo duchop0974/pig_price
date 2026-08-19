@@ -143,6 +143,20 @@ def set_user_active(user_id: int, is_active: bool, db_path: Path) -> None:
         conn.close()
 
 
+def delete_user(user_id: int, db_path: Path) -> None:
+    """Xoá vĩnh viễn 1 tài khoản. Không bảng nào khác FK cứng tới users.id —
+    created_by/approved_by/... ở các bảng nghiệp vụ đều là TEXT tự do (chỉ
+    lưu username lúc thao tác, không tham chiếu ràng buộc), nên không lo mồ
+    côi dữ liệu; chỉ cần dọn user_farms (bảng gán trại, đơn thuần liên kết)."""
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM user_farms WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def reset_password(user_id: int, new_password: str, db_path: Path) -> None:
     conn = get_connection(db_path)
     try:

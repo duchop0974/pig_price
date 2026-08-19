@@ -2,8 +2,8 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "pig-price-web",
-      "runtimeExecutable": "C:\\Users\\XTG\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\\python.exe",
+      "name": "pig_price-webapp",
+      "runtimeExecutable": "C:\\Users\\XTG\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe",
       "runtimeArgs": ["webapp/app.py"],
       "port": 5000,
       "autoPort": true

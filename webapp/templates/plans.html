@@ -1,14 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Kế hoạch xuất bán heo{% endblock %}
-{% block brand_title %}🗓️ Kế hoạch xuất bán{% endblock %}
-{% block brand_sub %}Kế hoạch trại · Kế hoạch bán{% endblock %}
+{% block brand_title %}🗓️ Kế hoạch trại{% endblock %}
+{% block brand_sub %}Nguồn cung heo (BM01){% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Kế hoạch trại</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">📋 Kế hoạch trại</h1>
+    <p class="page-header-desc">Nguồn cung heo (BM01)</p>
+  </div>
+</div>
+{% endblock %}
 
 {% block content %}
-  <h2 class="section-title">📋 Kế hoạch trại <span class="muted">— nguồn cung heo (BM01)</span></h2>
-
   {% if current_user_can('plans.create') %}
   <section id="plan-section" class="card plan-section">
     <h2>Thêm kế hoạch trại mới</h2>
+    <p id="plan-edit-notice" class="msg hidden"></p>
     <form id="plan-form" class="plan-form">
       <div class="control-row">
         <label for="plan-date">Ngày dự kiến</label>
@@ -39,11 +55,16 @@
         <input type="number" id="plan-quantity" min="1" step="1" placeholder="VD: 50" required>
       </div>
       <div class="control-row">
+        <label for="plan-weight">Trọng lượng dự kiến (kg/con)</label>
+        <input type="number" id="plan-weight" min="0" step="0.1" placeholder="Tùy chọn — VD: 110">
+      </div>
+      <div class="control-row">
         <label for="plan-note">Ghi chú</label>
         <input type="text" id="plan-note" placeholder="Tùy chọn">
       </div>
       <div class="control-row buttons">
-        <button type="submit" class="btn btn-primary">➕ Thêm kế hoạch</button>
+        <button type="submit" id="plan-submit-btn" class="btn btn-primary">➕ Thêm kế hoạch</button>
+        <button type="button" id="plan-cancel-edit" class="btn btn-ghost hidden">Huỷ sửa</button>
       </div>
       <p id="plan-msg" class="msg"></p>
     </form>
@@ -55,114 +76,76 @@
       <h2>Danh sách kế hoạch trại</h2>
       <a id="btn-export-plans" class="btn btn-ghost btn-sm" href="/api/plans/export.xlsx">⬇️ Xuất Excel</a>
     </div>
-    <div id="plan-list" class="plan-list"></div>
-  </section>
-
-  {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}
-  <h2 class="section-title">🧾 Kế hoạch bán <span class="muted">— Phòng bán hàng chào bán cho khách (BM02)</span></h2>
-
-  {% if current_user_can('plans.allocation_create') %}
-  <section id="allocation-section" class="card plan-section">
-    <h2>Tạo kế hoạch bán mới</h2>
-    <form id="allocation-form" class="plan-form">
+    <div class="filter-bar">
       <div class="control-row">
-        <label for="alloc-sale-plan">Từ kế hoạch trại</label>
-        <select id="alloc-sale-plan" required></select>
-      </div>
-      <div class="control-row">
-        <label for="alloc-quantity">Số lượng bán (con)</label>
-        <input type="number" id="alloc-quantity" min="1" step="1" placeholder="VD: 30" required>
-        <p id="alloc-remaining-hint" class="msg"></p>
-      </div>
-      <div class="control-row">
-        <label for="alloc-selling-price">Giá chào bán (đ/kg)</label>
-        <input type="number" id="alloc-selling-price" min="0" step="1000" placeholder="VD: 65000" required>
-      </div>
-      <div class="control-row">
-        <label for="alloc-note">Ghi chú</label>
-        <input type="text" id="alloc-note" placeholder="Tùy chọn">
-      </div>
-      <div class="control-row buttons">
-        <button type="submit" class="btn btn-primary">➕ Tạo kế hoạch bán</button>
-      </div>
-      <p id="allocation-msg" class="msg"></p>
-    </form>
-  </section>
-  {% endif %}
-
-  <section class="card plan-list-section">
-    <div class="section-head">
-      <h2>Danh sách kế hoạch bán</h2>
-      <a id="btn-export-allocations" class="btn btn-ghost btn-sm" href="/api/allocations/export.xlsx">⬇️ Xuất Excel</a>
-    </div>
-    <div id="allocation-list" class="plan-list"></div>
-  </section>
-
-  <div id="sale-details-modal" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h3>Chốt thông tin bán hàng</h3>
-      <div class="control-row">
-        <label for="sd-customer">Khách hàng</label>
-        <select id="sd-customer"><option value="">-- Chưa chọn --</option></select>
-      </div>
-      <div class="control-row">
-        <label for="sd-contact-note">Ghi chú liên hệ</label>
-        <textarea id="sd-contact-note" rows="3" placeholder="VD: đã gọi điện, khách đồng ý giá..."></textarea>
-      </div>
-      <div class="control-row">
-        <label for="sd-confirmed-date">Ngày chốt bán</label>
-        <input type="date" id="sd-confirmed-date">
-      </div>
-      <div class="control-row">
-        <label for="sd-selling-price">Giá chào bán (đ/kg)</label>
-        <input type="number" id="sd-selling-price" min="0" step="1000" placeholder="Tùy chọn">
-      </div>
-      <div class="control-row">
-        <label for="sd-delivery-time">Khung giờ giao</label>
-        <input type="text" id="sd-delivery-time" placeholder="VD: 07:00 - 09:00">
-      </div>
-      <div class="control-row">
-        <label for="sd-payment-method">Hình thức thanh toán</label>
-        <select id="sd-payment-method">
-          <option value="">-- Chưa chọn --</option>
-          <option value="bank_transfer_immediate">Chuyển khoản ngay</option>
-          <option value="bank_transfer_24h">Chuyển khoản trước 24h</option>
-          <option value="cash">Tiền mặt</option>
-          <option value="credit">Công nợ</option>
-          <option value="other">Khác</option>
+        <select id="plan-filter-farm"><option value="">Tất cả trại</option></select>
+        <select id="plan-filter-pig-type"><option value="">Tất cả loại heo</option></select>
+        <input type="date" id="plan-filter-date-from" title="Ngày dự kiến từ">
+        <input type="date" id="plan-filter-date-to" title="Ngày dự kiến đến">
+        <select id="plan-filter-status">
+          <option value="">Tất cả trạng thái</option>
+          <option value="pending_approval">Chờ duyệt</option>
+          <option value="approved">Đã duyệt</option>
+          <option value="rejected">Bị từ chối</option>
+          <option value="disabled">Đã vô hiệu hoá</option>
         </select>
+        <select id="plan-filter-reconcile">
+          <option value="">Đối soát: tất cả</option>
+          <option value="needs_reconciliation">Cần đối soát</option>
+          <option value="in_progress">Đang trong hạn</option>
+          <option value="reconciled">Đã đối soát</option>
+          <option value="over_delivered">Vượt kế hoạch</option>
+        </select>
+        <input type="text" id="plan-filter-search" placeholder="Tìm trại, mã kế hoạch, ghi chú...">
+      </div>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table admin-table-responsive admin-table-clickable">
+        <thead>
+          <tr>
+            <th>Mã kế hoạch</th><th>Trại</th><th>Loại heo</th><th>Ngày dự kiến</th>
+            <th>Số lượng</th><th>Trạng thái</th><th>Đối soát</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="plan-list"></tbody>
+      </table>
+    </div>
+    <p id="plan-list-empty" class="msg hidden">Không có kế hoạch nào khớp bộ lọc.</p>
+  </section>
+
+  <div id="reconcile-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Đối soát kế hoạch</h3>
+      <p id="rc-plan-code" class="plan-code"></p>
+      <div id="rc-summary" class="plan-meta-grid"></div>
+      <div class="control-row buttons" id="rc-kind-toggle">
+        <button type="button" class="btn btn-ghost" id="rc-kind-still_at_farm" data-kind="still_at_farm">Còn tại trại</button>
+        <button type="button" class="btn btn-ghost" id="rc-kind-continue_selling" data-kind="continue_selling">Tiếp tục bán</button>
+        <button type="button" class="btn btn-ghost" id="rc-kind-transferred" data-kind="transferred">Chuyển nguồn khác</button>
+        <button type="button" class="btn btn-ghost" id="rc-kind-culled" data-kind="culled">Loại</button>
+        <button type="button" class="btn btn-ghost" id="rc-kind-cancelled" data-kind="cancelled">Khách hủy</button>
+        <button type="button" class="btn btn-ghost" id="rc-kind-other" data-kind="other">Khác</button>
+      </div>
+      <div class="control-row">
+        <label for="rc-quantity">Số lượng (con)</label>
+        <input type="number" id="rc-quantity" min="1" step="1" placeholder="VD: 3">
+      </div>
+      <div class="control-row">
+        <label for="rc-reason">Lý do</label>
+        <textarea id="rc-reason" rows="3" placeholder="VD: Heo còn khoẻ, tiếp tục bán đợt sau"></textarea>
+      </div>
+      <div class="control-row">
+        <label for="rc-photos">Ảnh bằng chứng <span id="rc-photos-hint" class="msg"></span></label>
+        <input type="file" id="rc-photos" accept="image/*" capture="environment" multiple>
       </div>
       <div class="control-row buttons">
-        <button type="button" id="sd-save" class="btn btn-primary">Lưu</button>
-        <button type="button" id="sd-cancel" class="btn btn-ghost">Huỷ</button>
+        <button type="button" id="rc-save" class="btn btn-primary">Xác nhận</button>
+        <button type="button" id="rc-cancel" class="btn btn-ghost">Huỷ</button>
       </div>
-      <p id="sd-msg" class="msg"></p>
+      <p id="rc-msg" class="msg"></p>
     </div>
   </div>
 
-  <div id="revenue-modal" class="modal-overlay hidden">
-    <div class="modal-box">
-      <h3>Ghi nhận doanh thu &amp; hoá đơn</h3>
-      <div class="control-row">
-        <label for="rv-paid-amount">Số tiền đã thu (đ)</label>
-        <input type="number" id="rv-paid-amount" min="0" step="1000" placeholder="VD: 6500000">
-      </div>
-      <div class="control-row">
-        <label for="rv-weighing-ref">Số chứng từ cân</label>
-        <input type="text" id="rv-weighing-ref" placeholder="Tùy chọn — tham chiếu phần mềm cân">
-      </div>
-      <div class="control-row">
-        <label for="rv-invoice-number">Số hoá đơn</label>
-        <input type="text" id="rv-invoice-number" placeholder="Tùy chọn">
-      </div>
-      <div class="control-row buttons">
-        <button type="button" id="rv-save" class="btn btn-primary">Lưu</button>
-        <button type="button" id="rv-cancel" class="btn btn-ghost">Huỷ</button>
-      </div>
-      <p id="rv-msg" class="msg"></p>
-    </div>
-  </div>
-  {% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -172,5 +155,4 @@
 </script>
 <script src="{{ url_for('static', filename='js/common.js') }}"></script>
 <script src="{{ url_for('static', filename='js/plan.js') }}"></script>
-<script src="{{ url_for('static', filename='js/allocation.js') }}"></script>
 {% endblock %}

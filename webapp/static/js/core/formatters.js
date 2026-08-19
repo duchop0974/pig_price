@@ -1,9 +1,5 @@
 const el = (id) => document.getElementById(id);
 const fmtPrice = (v) => (v === null || v === undefined ? "" : Math.round(v).toLocaleString("vi-VN"));
-// Định dạng kg kiểu VN, tối đa 1 chữ số thập phân — KHÁC fmtPrice (làm tròn
-// nguyên, dùng cho đ/kg). null/undefined -> "—" (phân biệt "chưa nhập cân"
-// với "cân = 0" — xem _PLANNED_WEIGHT_SQL ở core/repositories/sale_plans_repo.py).
-const fmtWeight = (v) => (v === null || v === undefined ? "—" : v.toLocaleString("vi-VN", { maximumFractionDigits: 1 }));
 
 // Ô nhập giá dạng text (không phải type=number) để hiển thị được dấu chấm
 // ngăn cách hàng nghìn trong lúc gõ — 2 hàm thuần, không đụng DOM, dùng cho

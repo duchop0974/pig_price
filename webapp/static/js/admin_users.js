@@ -33,8 +33,18 @@ async function handleListClick(e) {
   const toggleBtn = e.target.closest(".btn-toggle");
   const resetBtn = e.target.closest(".btn-reset");
   const assignBtn = e.target.closest(".btn-assign-farms");
+  const deleteBtn = e.target.closest(".btn-delete-user");
 
-  if (toggleBtn) {
+  if (deleteBtn) {
+    if (!confirm("Xoá VĨNH VIỄN tài khoản này? Không thể hoàn tác.")) return;
+    const res = await fetch(`/api/admin/users/${deleteBtn.dataset.id}`, { method: "DELETE" });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(payload.error || "Lỗi khi xoá tài khoản.");
+      return;
+    }
+    location.reload();
+  } else if (toggleBtn) {
     const id = toggleBtn.dataset.id;
     const currentlyActive = toggleBtn.dataset.active === "1";
     const label = currentlyActive ? "khoá" : "mở lại";

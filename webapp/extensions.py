@@ -12,6 +12,10 @@ from core.repositories import audit_repo
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "gia_heo_hoi.db"
+# Ảnh/video bằng chứng (media_proof) — lưu đĩa cứng local, không cloud (app
+# chạy 1 máy Windows). Script backup thủ công phải backup thêm thư mục này,
+# không chỉ DB_PATH.
+MEDIA_ROOT = BASE_DIR / "data" / "media"
 
 # Giữ tên file cũ để người dùng đã quen (trước đây chứa mật khẩu dùng chung,
 # giờ chứa mật khẩu của tài khoản admin mặc định được tạo tự động lần đầu).

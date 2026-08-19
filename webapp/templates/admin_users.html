@@ -76,6 +76,7 @@
                 {{ 'Khoá' if u.is_active else 'Mở lại' }}
               </button>
               <button type="button" class="btn btn-ghost btn-sm btn-reset" data-id="{{ u.id }}">Đặt lại mật khẩu</button>
+              <button type="button" class="btn btn-danger btn-sm btn-delete-user" data-id="{{ u.id }}">Xoá</button>
             </td>
           </tr>
           {% endfor %}

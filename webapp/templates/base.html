@@ -23,7 +23,14 @@
     <nav class="topbar-nav">
       <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.index' else '' }}" href="{{ url_for('dashboard.index') }}">Tổng quan</a>
       <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch xuất bán</a>
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch trại</a>
+      {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}" href="{{ url_for('plans.allocations_page') }}">Kế hoạch bán</a>
+      {% endif %}
+      {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.reconcile_create') %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}" href="{{ url_for('plans.doi_soat_page') }}">Đối soát</a>
+      {% endif %}
+      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.bao_cao_page' else '' }}" href="{{ url_for('plans.bao_cao_page') }}">Báo cáo</a>
       {% if current_user_can('customers.view') %}
       <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.customers_page' else '' }}" href="{{ url_for('plans.customers_page') }}">Khách hàng</a>
       {% endif %}
@@ -56,8 +63,12 @@
 {% endblock %}
 
 <main>
+{% block breadcrumb %}{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}{% endblock %}
 </main>
+
+<div class="toast-container"></div>
 
 <footer>
   {% block footer %}
@@ -67,6 +78,10 @@
   {% endblock %}
 </footer>
 
+<script src="{{ url_for('static', filename='js/core/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core/toast.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core/status.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core/modal.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

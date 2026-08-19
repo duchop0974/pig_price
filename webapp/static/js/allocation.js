@@ -1,9 +1,20 @@
-// Ai tạo/quản lý/chốt bán/ghi doanh thu kế hoạch bán — khớp permission_required
-// tương ứng ở server (webapp/routes/plans.py, route /api/allocations*).
+// Ai tạo/quản lý/chốt bán/ghi doanh thu đơn hàng — khớp permission_required
+// tương ứng ở server (webapp/routes/plans.py, route /api/orders*).
 const CAN_CREATE_ALLOCATION = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.allocation_create");
 const CAN_MANAGE_ALLOCATIONS = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.allocation_manage");
 const CAN_ALLOC_SALE_DETAILS = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.sale_details");
 const CAN_ALLOC_REVENUE_DETAILS = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.revenue_details");
+// Xoá vĩnh viễn đơn hàng / sửa dòng hàng bất kể trạng thái — mặc định chỉ
+// admin có 2 quyền này (Giai đoạn 9), khớp plans.order_delete/plans.order_edit_line ở server.
+const CAN_DELETE_ORDERS = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.order_delete");
+const CAN_EDIT_ORDER_LINE = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.order_edit_line");
+// Khoá vĩnh viễn đơn hàng (Data Freeze) — mặc định chỉ admin có, khớp
+// plans.order_lock ở server.
+const CAN_LOCK_ORDER = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.order_lock");
+// Ghi nhận / xoá lần xuất giao thực tế (sale_deliveries) — khớp
+// plans.delivery_create/plans.delivery_delete ở server.
+const CAN_RECORD_DELIVERY = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.delivery_create");
+const CAN_DELETE_DELIVERY = (window.CURRENT_USER_PERMISSIONS || []).includes("plans.delivery_delete");
 
 const ALLOC_PAYMENT_METHOD_LABEL = {
   bank_transfer_immediate: "Chuyển khoản ngay",
@@ -13,153 +24,295 @@ const ALLOC_PAYMENT_METHOD_LABEL = {
   other: "Khác",
 };
 
-let currentAllocations = [];
+let currentOrders = [];
+let currentAvailablePlans = [];
+// Giỏ nháp phía client (đơn hàng đang xây dựng, CHƯA gọi API) — mỗi phần tử:
+// {sale_plan_id, quantity, selling_price, note, _display: {...}}.
+let draftLines = [];
+// Khi khác null: form "Thêm dòng heo" đang thêm trực tiếp vào 1 đơn ĐANG CÓ
+// (qua API ngay, không qua giỏ nháp) thay vì xây đơn mới.
+let targetOrderId = null;
 
 function fillSalePlanOptions(plans) {
-  const select = el("alloc-sale-plan");
+  const select = el("line-sale-plan");
   if (!select) return;
   const current = select.value;
-  const eligible = (plans || []).filter((p) => p.status === "approved" && p.remaining_quantity > 0);
-  if (!eligible.length) {
-    select.innerHTML = `<option value="" disabled selected>Chưa có kế hoạch trại nào còn số lượng để bán</option>`;
-    el("alloc-remaining-hint").textContent = "";
+  if (!plans.length) {
+    select.innerHTML = `<option value="" disabled selected>Chưa có nguồn heo nào còn số lượng để bán</option>`;
+    updateRemainingHint();
     return;
   }
-  select.innerHTML = eligible
-    .map(
-      (p) =>
-        `<option value="${p.id}" data-remaining="${p.remaining_quantity}">${p.plan_code || "#" + p.id} — ${p.farm}${p.zone ? " · " + p.zone : ""} · ${p.pig_type_name || ""} (còn ${p.remaining_quantity} con)</option>`
-    )
-    .join("");
+  select.innerHTML =
+    `<option value="" disabled ${current ? "" : "selected"}>-- Chọn nguồn heo --</option>` +
+    plans
+      .map(
+        (p) =>
+          `<option value="${p.id}">${p.plan_code || "#" + p.id} — ${p.farm}${p.zone ? " · " + p.zone : ""} · ${p.pig_type_name || ""} (còn ${p.remaining_quantity} con)</option>`
+      )
+      .join("");
   if ([...select.options].some((o) => o.value === current)) select.value = current;
   updateRemainingHint();
 }
-window.onPlansLoaded = fillSalePlanOptions;
 
-function updateRemainingHint() {
-  const select = el("alloc-sale-plan");
-  const hint = el("alloc-remaining-hint");
-  if (!select || !hint) return;
-  const opt = select.options[select.selectedIndex];
-  hint.textContent = opt && opt.dataset.remaining ? `Còn lại: ${opt.dataset.remaining} con` : "";
+// Danh sách option cho 2 bộ lọc Trại/Loại heo — lấy trực tiếp từ dữ liệu đã
+// tải (không gọi API riêng), giữ lại lựa chọn hiện tại nếu vẫn còn hợp lệ.
+function fillFilterOptions(plans) {
+  const farmSelect = el("filter-farm");
+  const typeSelect = el("filter-pig-type");
+  if (!farmSelect || !typeSelect) return;
+  const farms = [...new Set(plans.map((p) => p.farm).filter(Boolean))].sort();
+  const types = [...new Set(plans.map((p) => p.pig_type_name).filter(Boolean))].sort();
+  const curFarm = farmSelect.value;
+  const curType = typeSelect.value;
+  farmSelect.innerHTML = `<option value="">Tất cả trại</option>` + farms.map((f) => `<option value="${f}">${f}</option>`).join("");
+  typeSelect.innerHTML = `<option value="">Tất cả loại heo</option>` + types.map((t) => `<option value="${t}">${t}</option>`).join("");
+  if (farms.includes(curFarm)) farmSelect.value = curFarm;
+  if (types.includes(curType)) typeSelect.value = curType;
 }
 
-function allocationStatusBadge(a) {
-  if (a.status === "done") return `<span class="plan-badge done">Đã bán</span>`;
-  if (a.status === "cancelled") return `<span class="plan-badge cancelled">Đã hủy</span>`;
-  if (a.status === "disabled") return `<span class="plan-badge disabled">🚫 Đã vô hiệu hoá</span>`;
-  if (a.reached_target) return `<span class="plan-badge reached">🔔 Đã đạt giá mong muốn</span>`;
-  if (a.days_left === null || a.days_left === undefined) return "";
-  if (a.days_left < 0) return `<span class="plan-badge overdue">Đã qua ${Math.abs(a.days_left)} ngày</span>`;
-  if (a.days_left === 0) return `<span class="plan-badge today">Hôm nay</span>`;
-  return `<span class="plan-badge">Còn ${a.days_left} ngày</span>`;
-}
-
-function renderAllocations(allocs) {
-  const box = el("allocation-list");
+// Tổng quan nguồn cung — nhóm theo loại heo, chỉ tính các kế hoạch còn số
+// lượng (giữ đúng cách tính của "Tổng hợp theo loại heo" cũ).
+function renderSupplyCards(plans) {
+  const box = el("supply-summary-cards");
   if (!box) return;
-  if (!allocs.length) {
-    box.innerHTML = `<p class="msg">Chưa có kế hoạch bán nào.</p>`;
+  const available = plans.filter((p) => p.remaining_quantity > 0);
+  if (!available.length) {
+    box.innerHTML = `<p class="msg">Chưa có nguồn cung nào từ trại.</p>`;
     return;
   }
+  const byType = new Map();
+  for (const p of available) {
+    const key = p.pig_type_name || "—";
+    const cur = byType.get(key) || { remaining: 0, count: 0 };
+    cur.remaining += p.remaining_quantity;
+    cur.count += 1;
+    byType.set(key, cur);
+  }
+  box.innerHTML = [...byType.entries()]
+    .map(
+      ([name, v]) => `<div class="kpi-tile">
+        <div class="kpi-label">${name}</div>
+        <div class="kpi-value">${v.remaining}<span class="unit"> con</span></div>
+        <div class="kpi-sub">${v.count} kế hoạch</div>
+      </div>`
+    )
+    .join("");
+}
 
-  box.innerHTML = allocs
-    .map((a) => {
-      const hasCur = a.current_price !== null && a.current_price !== undefined;
-      const scopeLabel = a.current_price_is_national
-        ? "cả nước — trại chưa gán tỉnh hoặc tỉnh chưa có dữ liệu"
-        : `tỉnh ${a.province}`;
-      const curHtml = hasCur
-        ? `${fmtPrice(a.current_price)}<span class="unit"> đ/kg</span> (${scopeLabel}, ngày ${a.current_price_date})`
-        : "Chưa có dữ liệu";
-      const diff = hasCur && a.selling_price ? a.current_price - a.selling_price : null;
-      const diffHtml =
-        diff === null
-          ? ""
-          : `<div class="plan-row"><span>Chênh lệch</span><strong class="${diff >= 0 ? "plan-up" : "plan-down"}">${diff >= 0 ? "+" : ""}${fmtPrice(diff)} đ/kg</strong></div>`;
-      const actualHtml =
-        a.status === "done" && a.actual_price !== null && a.actual_price !== undefined
-          ? `<div class="plan-row"><span>Giá bán thực tế</span><strong>${fmtPrice(a.actual_price)} đ/kg</strong></div>
-             <div class="plan-row"><span>Số lượng đã bán</span><strong>${a.actual_quantity} con</strong></div>`
-          : "";
-      let actions = "";
-      if (CAN_MANAGE_ALLOCATIONS) {
-        if (a.status === "active") {
-          actions += `<button type="button" class="btn alloc-btn-done" data-id="${a.id}">✅ Đã bán</button>
-             <button type="button" class="btn alloc-btn-disable" data-id="${a.id}">🚫 Vô hiệu hoá</button>`;
-        } else if (a.status === "disabled") {
-          actions += `<button type="button" class="btn alloc-btn-enable" data-id="${a.id}">▶️ Kích hoạt lại</button>`;
-        }
-      }
-      if (a.status === "active" && CAN_ALLOC_SALE_DETAILS) {
-        actions += `<button type="button" class="btn alloc-btn-sale-details" data-id="${a.id}">🤝 Chốt bán hàng</button>
-             <button type="button" class="btn alloc-btn-quotation" data-id="${a.id}">⬇️ Xuất chào hàng</button>`;
-      }
-      if (a.status === "done" && CAN_ALLOC_REVENUE_DETAILS) {
-        actions += `<button type="button" class="btn alloc-btn-revenue" data-id="${a.id}">💰 Ghi nhận doanh thu</button>`;
-      }
-      const reachedCls =
-        a.status === "disabled" ? "plan-card-disabled" : a.reached_target && a.status === "active" ? "plan-card-reached" : "";
-      const saleDetailsHtml =
-        a.customer_name || a.contact_note || a.confirmed_sale_at || a.delivery_time || a.payment_method
-          ? `${a.customer_name ? `<div class="plan-row"><span>Khách hàng</span><strong>${a.customer_name}${a.customer_phone ? " · " + a.customer_phone : ""}</strong></div>` : ""}
-             ${a.confirmed_sale_at ? `<div class="plan-row"><span>Ngày chốt bán</span><strong>${fmtIsoDate(a.confirmed_sale_at)}</strong></div>` : ""}
-             ${a.delivery_time ? `<div class="plan-row"><span>Khung giờ giao</span><strong>${a.delivery_time}</strong></div>` : ""}
-             ${a.payment_method ? `<div class="plan-row"><span>Thanh toán</span><strong>${ALLOC_PAYMENT_METHOD_LABEL[a.payment_method] || a.payment_method}</strong></div>` : ""}
-             ${a.contact_note ? `<div class="plan-note">Liên hệ (${a.contacted_by || "—"}): ${a.contact_note}</div>` : ""}`
-          : "";
-      const revenueDetailsHtml =
-        a.paid_amount || a.weighing_ref || a.invoice_number
-          ? `${a.paid_amount ? `<div class="plan-row"><span>Đã thu tiền</span><strong>${fmtPrice(a.paid_amount)} đ${a.paid_at ? " · " + fmtIsoDate(a.paid_at.slice(0, 10)) : ""}</strong></div>` : ""}
-             ${a.weighing_ref ? `<div class="plan-row"><span>Chứng từ cân</span><strong>${a.weighing_ref}</strong></div>` : ""}
-             ${a.invoice_number ? `<div class="plan-row"><span>Số hoá đơn</span><strong>${a.invoice_number}${a.invoiced_by ? " · " + a.invoiced_by : ""}</strong></div>` : ""}`
-          : "";
+// Lọc thuần phía client (Trại/Loại heo/Khoảng ngày/Trạng thái/Search) — đọc
+// trực tiếp giá trị hiện tại của các control filter, không giữ state riêng
+// để tránh lệch đồng bộ với DOM.
+function applyAvailablePlanFilters(plans) {
+  const farm = el("filter-farm") ? el("filter-farm").value : "";
+  const pigType = el("filter-pig-type") ? el("filter-pig-type").value : "";
+  const dateFrom = el("filter-date-from") ? el("filter-date-from").value : "";
+  const dateTo = el("filter-date-to") ? el("filter-date-to").value : "";
+  const status = el("filter-status") ? el("filter-status").value : "available";
+  const q = (el("filter-search") ? el("filter-search").value : "").trim().toLowerCase();
+  return plans.filter((p) => {
+    if (farm && p.farm !== farm) return false;
+    if (pigType && p.pig_type_name !== pigType) return false;
+    if (dateFrom && p.planned_date && p.planned_date < dateFrom) return false;
+    if (dateTo && p.planned_date && p.planned_date > dateTo) return false;
+    if (status === "available" && p.remaining_quantity <= 0) return false;
+    if (status === "soldout" && p.remaining_quantity > 0) return false;
+    if (q) {
+      const hay = `${p.farm || ""} ${p.zone || ""} ${p.plan_code || ""} ${p.note || ""} ${p.pig_type_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
 
-      return `<article class="plan-card ${reachedCls}">
-        <div class="plan-card-head">
-          <strong>${a.farm}${a.zone ? " · " + a.zone : ""}</strong>
-          ${allocationStatusBadge(a)}
-        </div>
-        ${a.plan_code ? `<div class="plan-code">${a.plan_code}</div>` : ""}
-        ${a.sale_plan_code ? `<div class="plan-row"><span>Từ kế hoạch trại</span><strong>${a.sale_plan_code}</strong></div>` : ""}
-        <div class="plan-row"><span>Loại heo</span><strong>${a.pig_type_name || "—"}</strong></div>
-        <div class="plan-row"><span>Ngày dự kiến</span><strong>${fmtIsoDate(a.planned_date)}</strong></div>
-        <div class="plan-row"><span>Số lượng</span><strong>${a.quantity} con</strong></div>
-        <div class="plan-row"><span>Giá chào bán</span><strong>${a.selling_price ? fmtPrice(a.selling_price) + " đ/kg" : "—"}</strong></div>
-        <div class="plan-row"><span>Giá hiện tại</span><strong>${curHtml}</strong></div>
-        ${diffHtml}
-        ${saleDetailsHtml}
-        ${actualHtml}
-        ${revenueDetailsHtml}
-        ${a.note ? `<div class="plan-note">${a.note}</div>` : ""}
-        ${actions ? `<div class="plan-actions">${actions}</div>` : ""}
-      </article>`;
+function renderAvailablePlans(plans) {
+  const box = el("available-plans-list");
+  if (!box) return;
+  if (!plans.length) {
+    box.innerHTML = `<tr><td colspan="9">Không có nguồn cung phù hợp bộ lọc.</td></tr>`;
+    return;
+  }
+  const selectEl = el("line-sale-plan");
+  const selectedId = selectEl ? selectEl.value : "";
+  box.innerHTML = plans
+    .map((p) => {
+      const soldOut = p.remaining_quantity <= 0;
+      const needsReconcile = p.reconciliation_status === "needs_reconciliation";
+      const isSelected = !soldOut && CAN_CREATE_ALLOCATION && String(p.id) === selectedId;
+      const rowCls = [soldOut ? "is-soldout" : "", isSelected ? "is-selected" : ""].filter(Boolean).join(" ");
+      // "Đã bán" (nhãn cũ) thực ra hiển thị allocated_quantity (số đã "nhặt"
+      // vào đơn, có thể chưa giao) — đổi nhãn cho đúng bản chất thay vì đổi
+      // số liệu (remaining_quantity vẫn cần giữ nguyên ý nghĩa "còn để phân
+      // bổ", KHÔNG đổi sang remaining_to_reconcile — 1 đơn đang active chưa
+      // "Đã bán" vẫn tính là hết chỗ để phân bổ thêm dù remaining_to_reconcile
+      // có thể còn > 0). Cảnh báo "Cần đối soát" hiện riêng ở cột trạng thái.
+      const statusBadge = soldOut
+        ? `<span class="badge">Đã bán hết</span>`
+        : needsReconcile
+          ? `<span class="badge badge-warning">⚠ Cần đối soát</span>`
+          : `<span class="badge badge-success">Có thể bán</span>`;
+      let actionCell = "";
+      if (CAN_CREATE_ALLOCATION) {
+        actionCell = soldOut
+          ? `<button type="button" class="btn btn-ghost btn-sm" disabled>Đã bán hết</button>`
+          : isSelected
+            ? `<button type="button" class="btn btn-primary btn-sm" disabled>✓ Đã chọn</button>`
+            : `<button type="button" class="btn btn-ghost btn-sm btn-pick-plan" data-id="${p.id}">Chọn nguồn này</button>`;
+      }
+      return `<tr class="${rowCls}">
+        <td data-label="Trại">${p.farm}${p.zone ? " · " + p.zone : ""}</td>
+        <td data-label="Loại heo">${p.pig_type_name || "—"}</td>
+        <td data-label="Kế hoạch">${p.plan_code || "—"}</td>
+        <td data-label="Ngày">${fmtIsoDate(p.planned_date)}</td>
+        <td data-label="Được duyệt">${p.quantity}</td>
+        <td data-label="Đã phân bổ">${p.allocated_quantity}</td>
+        <td data-label="Còn lại">${p.remaining_quantity}</td>
+        <td data-label="Trạng thái">${statusBadge}</td>
+        <td>${actionCell}</td>
+      </tr>`;
     })
     .join("");
 }
 
-async function loadAllocations() {
-  const box = el("allocation-list");
-  if (!box) return;
-  const res = await fetch("/api/allocations");
-  const allocs = await res.json();
-  currentAllocations = allocs;
-  renderAllocations(allocs);
+function refreshAvailablePlansView() {
+  renderAvailablePlans(applyAvailablePlanFilters(currentAvailablePlans));
 }
 
-async function submitAllocation(e) {
-  e.preventDefault();
-  const msg = el("allocation-msg");
+async function loadAvailablePlans() {
+  const res = await fetch("/api/plans");
+  const plans = await res.json();
+  const eligible = (plans || []).filter((p) => p.status === "approved");
+  currentAvailablePlans = eligible;
+  fillFilterOptions(eligible);
+  fillSalePlanOptions(eligible.filter((p) => p.remaining_quantity > 0));
+  renderSupplyCards(eligible);
+  refreshAvailablePlansView();
+}
+
+function pickPlan(planId) {
+  const select = el("line-sale-plan");
+  if (!select) return;
+  if ([...select.options].some((o) => o.value === String(planId))) select.value = String(planId);
+  updateRemainingHint();
+  const form = el("line-section");
+  if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Điểm tập trung duy nhất mỗi lần nguồn heo đang chọn đổi (đổi select hoặc
+// bấm "Chọn nguồn này" trong bảng) — cập nhật banner "Đã chọn nguồn", vẽ lại
+// bảng nguồn cung để tô đúng dòng đang chọn, và tính lại validation số lượng.
+function updateRemainingHint() {
+  const select = el("line-sale-plan");
+  if (!select) return;
+  const opt = select.options[select.selectedIndex];
+  const plan = opt && opt.value ? currentAvailablePlans.find((p) => String(p.id) === opt.value) : null;
+  const box = el("selected-source-box");
+  if (box) {
+    if (plan) {
+      box.classList.remove("hidden");
+      box.querySelector(".selected-source-code").textContent = plan.plan_code || "#" + plan.id;
+      box.querySelector(".selected-source-detail").textContent =
+        `${plan.farm}${plan.zone ? " · " + plan.zone : ""} — ${plan.pig_type_name || "—"}`;
+      box.querySelector(".selected-source-remaining-value").textContent = plan.remaining_quantity;
+    } else {
+      box.classList.add("hidden");
+    }
+  }
+  refreshAvailablePlansView();
+  computeQuantityFeedback();
+}
+
+// Validation số lượng bán real-time — trừ luôn số lượng CÙNG kế hoạch trại
+// đã có sẵn trong giỏ nháp, để không cho vượt remaining thực tế khi cộng dồn
+// nhiều dòng cùng 1 nguồn trước khi tạo đơn.
+function computeQuantityFeedback() {
+  const feedback = el("line-quantity-feedback");
+  const select = el("line-sale-plan");
+  const qtyInput = el("line-quantity");
+  if (!feedback || !select || !qtyInput) return { valid: false };
+  const opt = select.options[select.selectedIndex];
+  const plan = opt && opt.value ? currentAvailablePlans.find((p) => String(p.id) === opt.value) : null;
+  const qtyRaw = qtyInput.value;
+  const qty = Number(qtyRaw);
+
+  feedback.className = "msg plan-form-feedback";
+  if (!plan) {
+    feedback.textContent = "";
+    return { valid: false };
+  }
+  if (!qtyRaw) {
+    feedback.textContent = `Còn lại: ${plan.remaining_quantity} con`;
+    return { valid: false };
+  }
+  if (!Number.isFinite(qty) || qty <= 0) {
+    feedback.className = "msg plan-form-feedback error";
+    feedback.textContent = "⚠ Số lượng phải lớn hơn 0.";
+    return { valid: false };
+  }
+  const reserved = draftLines
+    .filter((l) => String(l.sale_plan_id) === String(plan.id))
+    .reduce((sum, l) => sum + Number(l.quantity || 0), 0);
+  const effectiveRemaining = plan.remaining_quantity - reserved;
+  if (qty > effectiveRemaining) {
+    feedback.className = "msg plan-form-feedback error";
+    feedback.textContent = `⚠ Số lượng bán vượt số lượng còn lại. Chỉ còn ${effectiveRemaining} con.`;
+    return { valid: false };
+  }
+  feedback.className = "msg plan-form-feedback success";
+  feedback.textContent = `✓ Hợp lệ — sau khi bán còn ${effectiveRemaining - qty} con.`;
+  return { valid: true };
+}
+
+// ---- Giỏ nháp (đơn hàng đang xây dựng) ----
+
+function renderDraftCart() {
+  const box = el("draft-cart-list");
+  const btn = el("btn-create-order");
+  const totalEl = el("draft-total");
+  if (!box) return;
+  if (!draftLines.length) {
+    box.innerHTML = `<tr><td colspan="8"><strong>Chưa có sản phẩm trong đơn hàng</strong><br>Chọn nguồn heo và thêm số lượng để bắt đầu tạo đơn.</td></tr>`;
+  } else {
+    box.innerHTML = draftLines
+      .map(
+        (l, idx) => `<tr>
+          <td data-label="#">${idx + 1}</td>
+          <td data-label="Trại">${l._display.farm}${l._display.zone ? " · " + l._display.zone : ""}</td>
+          <td data-label="Loại heo">${l._display.pig_type_name || "—"}</td>
+          <td data-label="Kế hoạch">${l._display.plan_code || "—"}</td>
+          <td data-label="Số lượng">${l.quantity} con</td>
+          <td data-label="Giá">${fmtPrice(l.selling_price)} đ/kg</td>
+          <td class="detail-cell" data-label="Ghi chú">${l.note || ""}</td>
+          <td><button type="button" class="btn btn-danger btn-sm btn-remove-draft-line" data-index="${idx}">Xoá</button></td>
+        </tr>`
+      )
+      .join("");
+  }
+  if (totalEl) {
+    const totalQty = draftLines.reduce((sum, l) => sum + Number(l.quantity || 0), 0);
+    totalEl.textContent = draftLines.length ? `Tổng số lượng: ${totalQty} con` : "";
+  }
+  if (btn) btn.disabled = draftLines.length === 0;
+}
+
+function removeDraftLine(index) {
+  draftLines.splice(Number(index), 1);
+  renderDraftCart();
+}
+
+async function createOrderFromDraft() {
+  const msg = el("draft-msg");
   msg.className = "msg";
-  msg.textContent = "Đang lưu...";
+  msg.textContent = "Đang tạo đơn...";
   const body = {
-    sale_plan_id: el("alloc-sale-plan").value,
-    quantity: el("alloc-quantity").value,
-    selling_price: el("alloc-selling-price").value,
-    note: el("alloc-note").value,
+    lines: draftLines.map((l) => ({
+      sale_plan_id: l.sale_plan_id,
+      quantity: l.quantity,
+      selling_price: l.selling_price,
+      note: l.note,
+    })),
   };
   try {
-    const res = await fetch("/api/allocations", {
+    const res = await fetch("/api/orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -167,55 +320,630 @@ async function submitAllocation(e) {
     const payload = await res.json();
     if (!res.ok) {
       msg.className = "msg error";
-      msg.textContent = payload.error || "Lỗi khi tạo kế hoạch bán.";
+      msg.textContent = payload.error || "Lỗi khi tạo đơn hàng.";
       return;
     }
-    msg.textContent = "Đã tạo kế hoạch bán.";
-    el("allocation-form").reset();
-    await loadPlans();
-    await loadAllocations();
+    msg.textContent = "Đã tạo đơn hàng.";
+    draftLines = [];
+    renderDraftCart();
+    await loadAvailablePlans();
+    await loadOrders();
   } catch (err) {
     msg.className = "msg error";
     msg.textContent = "Lỗi khi lưu: " + err;
   }
 }
 
-async function markAllocationDone(allocationId) {
-  const actualPrice = prompt("Giá bán thực tế (đ/kg):");
-  if (actualPrice === null) return;
-  const actualQuantity = prompt("Số lượng đã bán thực tế (con):");
-  if (actualQuantity === null) return;
-  const res = await fetch(`/api/allocations/${allocationId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status: "done", actual_price: actualPrice, actual_quantity: actualQuantity }),
-  });
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    alert(payload.error || "Lỗi khi cập nhật kế hoạch bán.");
-    return;
-  }
-  await loadAllocations();
+// ---- Form "Thêm dòng heo" — 2 chế độ: thêm vào giỏ nháp, hoặc thêm thẳng
+// vào 1 đơn đang có sẵn (targetOrderId) ----
+
+function startAddLineToOrder(orderId) {
+  const order = currentOrders.find((o) => String(o.id) === String(orderId));
+  if (!order) return;
+  targetOrderId = orderId;
+  el("line-submit-btn").textContent = "+ Thêm vào đơn";
+  const notice = el("line-target-notice");
+  notice.textContent = `Đang thêm dòng vào đơn ${order.order_code || "#" + order.id}`;
+  notice.classList.remove("hidden");
+  el("line-cancel-target").classList.remove("hidden");
+  const section = el("line-section");
+  if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-async function setAllocationStatus(allocationId, status) {
-  const res = await fetch(`/api/allocations/${allocationId}`, {
+function cancelAddLineTarget() {
+  targetOrderId = null;
+  el("line-form").reset();
+  el("line-submit-btn").textContent = "+ Thêm vào đơn";
+  el("line-target-notice").classList.add("hidden");
+  el("line-cancel-target").classList.add("hidden");
+  el("line-msg").className = "msg";
+  el("line-msg").textContent = "";
+  updateRemainingHint();
+}
+
+async function handleLineFormSubmit(e) {
+  e.preventDefault();
+  const msg = el("line-msg");
+  msg.className = "msg";
+  const planId = el("line-sale-plan").value;
+  const plan = currentAvailablePlans.find((p) => String(p.id) === String(planId));
+  const priceValue = parsePriceInputValue(el("line-selling-price").value);
+
+  if (plan) {
+    const feedback = computeQuantityFeedback();
+    if (!feedback.valid) {
+      msg.className = "msg error";
+      msg.textContent = "Vui lòng nhập số lượng hợp lệ — xem gợi ý phía trên nút Thêm vào đơn.";
+      return;
+    }
+  }
+  if (!priceValue || priceValue <= 0) {
+    msg.className = "msg error";
+    msg.textContent = "Giá chào bán phải lớn hơn 0.";
+    return;
+  }
+
+  const line = {
+    sale_plan_id: planId,
+    quantity: el("line-quantity").value,
+    selling_price: priceValue,
+    note: el("line-note").value,
+  };
+
+  if (targetOrderId) {
+    msg.textContent = "Đang lưu...";
+    try {
+      const res = await fetch(`/api/orders/${targetOrderId}/lines`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(line),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        msg.className = "msg error";
+        msg.textContent = payload.error || "Lỗi khi thêm dòng.";
+        return;
+      }
+      cancelAddLineTarget();
+      await loadAvailablePlans();
+      await loadOrders();
+    } catch (err) {
+      msg.className = "msg error";
+      msg.textContent = "Lỗi khi lưu: " + err;
+    }
+    return;
+  }
+
+  if (!plan) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng chọn nguồn heo hợp lệ.";
+    return;
+  }
+  draftLines.push({
+    ...line,
+    _display: { farm: plan.farm, zone: plan.zone, pig_type_name: plan.pig_type_name, plan_code: plan.plan_code },
+  });
+  renderDraftCart();
+  el("line-form").reset();
+  updateRemainingHint();
+  msg.textContent = "Đã thêm vào giỏ nháp.";
+}
+
+// ---- Đơn hàng ----
+
+function orderStatusBadge(o) {
+  if (o.status === "done") return renderBadge("done");
+  if (o.status === "cancelled") return renderBadge("cancelled");
+  if (o.status === "disabled") return renderBadge("disabled");
+  return renderBadge("active");
+}
+
+// Mini workflow stepper cho vòng đời đơn hàng: Đang xử lý → Chốt bán hàng →
+// Đã bán → Doanh thu ghi nhận. Chốt bán hàng và Đã bán có thể xảy ra không
+// theo đúng thứ tự này ở thực tế (backend không ép buộc) nên mỗi bước tự
+// tính "done" theo dữ liệu riêng của nó, chỉ bước đầu tiên chưa xong được
+// đánh dấu is-current — tránh hiển thị sai khi thứ tự thực tế bị đảo.
+// disabled/cancelled → is-exception ngay tại bước đầu tiên còn dang dở.
+const ORDER_STEPPER_STATE_CLASS = { done: "is-done", current: "is-current", pending: "", exception: "is-exception", locked: "is-locked" };
+const ORDER_STEPPER_MARKER = { done: "✓", current: "●", pending: "○", exception: "!", locked: "🔒" };
+
+function orderStepperHtml(order) {
+  const labels = ["Đang xử lý", "Chốt bán hàng", "Đã bán", "Doanh thu ghi nhận"];
+  const flags = [
+    true,
+    !!(order.customer_name || order.confirmed_sale_at || order.payment_method || order.delivery_time),
+    order.status === "done",
+    !!(order.paid_amount || order.invoice_number),
+  ];
+  let states;
+  if (order.status === "cancelled" || order.status === "disabled") {
+    const firstFalse = flags.findIndex((f) => !f);
+    const cut = firstFalse === -1 ? flags.length - 1 : firstFalse;
+    states = labels.map((_, i) => (i < cut ? "done" : i === cut ? "exception" : "locked"));
+  } else {
+    let currentSet = false;
+    states = flags.map((f) => {
+      if (f) return "done";
+      if (!currentSet) {
+        currentSet = true;
+        return "current";
+      }
+      return "pending";
+    });
+  }
+  return `<div class="stepper">${labels
+    .map((label, i) => {
+      const s = states[i];
+      const connector = i < labels.length - 1 ? `<span class="stepper-connector"></span>` : "";
+      return `<span class="stepper-step ${ORDER_STEPPER_STATE_CLASS[s]}"><span class="stepper-step-marker">${ORDER_STEPPER_MARKER[s]}</span><span class="stepper-step-label">${label}</span></span>${connector}`;
+    })
+    .join("")}</div>`;
+}
+
+function incidentItemHtml(inc) {
+  const kindLabel = inc.kind === "culled" ? "Loại" : "Hủy";
+  const photos = (inc.media || []).map((m) => `<img src="/media/${m.id}" alt="" class="incident-photo">`).join("");
+  return `<div class="plan-note">
+    <strong>${kindLabel} ${inc.quantity} con</strong> — ${inc.description}
+    ${photos ? `<div class="incident-photos">${photos}</div>` : ""}
+  </div>`;
+}
+
+// Khối "Heo loại/hủy" trên 1 dòng hàng — đối chiếu kế hoạch − Σloại − Σhủy,
+// KHÔNG đụng tới line.actual_quantity (giữ độc lập, chỉ đối chiếu trực quan).
+function incidentSectionHtml(order, line) {
+  const lineIncidents = (order.incidents || []).filter((inc) => inc.allocation_id === line.id);
+  const culledQty = lineIncidents.filter((i) => i.kind === "culled").reduce((sum, i) => sum + i.quantity, 0);
+  const cancelledQty = lineIncidents.filter((i) => i.kind === "cancelled").reduce((sum, i) => sum + i.quantity, 0);
+  const reconciled = line.quantity - culledQty - cancelledQty;
+  const canAdd = order.status === "active" && CAN_CREATE_ALLOCATION;
+  if (!lineIncidents.length && !canAdd) return "";
+  return `<div class="plan-card-section">
+    <div class="plan-card-section-label">Heo loại/hủy</div>
+    <div class="plan-meta-grid">
+      <div class="plan-row"><span>Kế hoạch</span><strong>${line.quantity} con</strong></div>
+      ${culledQty ? `<div class="plan-row"><span>Loại</span><strong class="plan-down">-${culledQty} con</strong></div>` : ""}
+      ${cancelledQty ? `<div class="plan-row"><span>Hủy</span><strong class="plan-down">-${cancelledQty} con</strong></div>` : ""}
+      ${culledQty || cancelledQty ? `<div class="plan-row"><span>Đối chiếu còn lại</span><strong>${reconciled} con</strong></div>` : ""}
+    </div>
+    ${lineIncidents.map(incidentItemHtml).join("")}
+    ${canAdd ? `<button type="button" class="btn btn-ghost btn-sm btn-add-incident" data-order-id="${order.id}" data-line-id="${line.id}">🐖 Ghi nhận Loại/Hủy</button>` : ""}
+  </div>`;
+}
+
+function deliveryItemHtml(d) {
+  const weightHtml = d.total_weight_kg !== null && d.total_weight_kg !== undefined ? ` · ${fmtWeight(d.total_weight_kg)} kg` : "";
+  const priceHtml = d.unit_price !== null && d.unit_price !== undefined ? ` · ${fmtPrice(d.unit_price)} đ/kg` : "";
+  // Bản ghi đã khoá (Data Freeze) thì không cho xoá — nút "Ghi nhận xuất
+  // giao" (thêm mới) đã tự ẩn theo order.locked_at ở deliverySectionHtml,
+  // nút xoá TỪNG DÒNG phải tự kiểm d.locked_at riêng (server đã chặn, đây là
+  // lớp UX tương ứng, tránh hiện nút chỉ để bấm ra lỗi 400).
+  const deleteHtml =
+    CAN_DELETE_DELIVERY && !d.locked_at
+      ? `<button type="button" class="btn btn-ghost btn-sm btn-delete-delivery" data-id="${d.id}">🗑️</button>`
+      : "";
+  return `<div class="plan-note">
+    <strong>${d.pig_type_name || "—"} · ${d.quantity} con</strong>${weightHtml}${priceHtml}
+    <div class="plan-note">${fmtIsoDate(d.delivered_date)}${d.created_by ? " · " + d.created_by : ""}${d.weighing_ref ? " · Phiếu cân " + d.weighing_ref : ""}</div>
+    ${d.note ? `<div class="plan-note">${d.note}</div>` : ""}
+    ${deleteHtml}
+  </div>`;
+}
+
+// Khối "Xuất giao thực tế" trên 1 dòng hàng — lịch sử các lần xuất (có thể
+// KHÁC loại heo kế hoạch, xem sale_deliveries). Rộng hơn điều kiện hiện nút
+// "🐖 Ghi nhận Loại/Hủy" (chỉ status active): xuất nhiều lần vẫn hợp lệ cả
+// khi đơn đã "Đã bán" (status done), chỉ chặn khi đã khoá (Data Freeze)/huỷ.
+function deliverySectionHtml(order, line) {
+  const lineDeliveries = (order.deliveries || []).filter((d) => d.allocation_id === line.id);
+  const canAdd = !order.locked_at && order.status !== "cancelled" && order.status !== "disabled" && CAN_RECORD_DELIVERY;
+  if (!lineDeliveries.length && !canAdd) return "";
+  return `<div class="plan-card-section">
+    <div class="plan-card-section-label">Xuất giao thực tế</div>
+    ${lineDeliveries.map(deliveryItemHtml).join("")}
+    ${canAdd ? `<button type="button" class="btn btn-ghost btn-sm btn-add-delivery" data-order-id="${order.id}" data-line-id="${line.id}">🚚 Ghi nhận xuất giao</button>` : ""}
+  </div>`;
+}
+
+function lineHtml(order, line) {
+  const hasCur = line.current_price !== null && line.current_price !== undefined;
+  const scopeLabel = line.current_price_is_national
+    ? "cả nước — trại chưa gán tỉnh hoặc tỉnh chưa có dữ liệu"
+    : `tỉnh ${line.province}`;
+  const curHtml = hasCur
+    ? `${fmtPrice(line.current_price)}<span class="unit"> đ/kg</span> (${scopeLabel}, ngày ${line.current_price_date})`
+    : "Chưa có dữ liệu";
+  const diff = hasCur && line.selling_price ? line.current_price - line.selling_price : null;
+  const diffHtml =
+    diff === null
+      ? ""
+      : `<div class="plan-row"><span>Chênh lệch</span><strong class="${diff >= 0 ? "plan-up" : "plan-down"}">${diff >= 0 ? "+" : ""}${fmtPrice(diff)} đ/kg</strong></div>`;
+  const reachedHtml = line.reached_target ? `<span class="badge badge-success">🔔 Đã đạt giá mong muốn</span>` : "";
+  const actualHtml =
+    order.status === "done" && line.actual_price !== null && line.actual_price !== undefined
+      ? `<div class="plan-row"><span>Giá bán thực tế</span><strong>${fmtPrice(line.actual_price)} đ/kg</strong></div>
+         <div class="plan-row"><span>Số lượng đã bán</span><strong>${line.actual_quantity} con</strong></div>`
+      : "";
+  const canRemove = order.status === "active" && CAN_CREATE_ALLOCATION && order.lines.length > 1;
+  let lineActions = "";
+  if (canRemove) {
+    lineActions += `<button type="button" class="btn btn-danger btn-remove-line" data-order-id="${order.id}" data-line-id="${line.id}">🗑️ Xoá dòng</button>`;
+  }
+  if (CAN_EDIT_ORDER_LINE) {
+    lineActions += `<button type="button" class="btn btn-ghost btn-edit-line" data-order-id="${order.id}" data-line-id="${line.id}">✏️ Sửa dòng</button>`;
+  }
+  return `<article class="plan-card">
+    <div class="plan-card-head">
+      <strong>${line.farm}${line.zone ? " · " + line.zone : ""} · ${line.pig_type_name || "—"}</strong>
+      ${reachedHtml}
+    </div>
+    ${line.plan_code ? `<div class="plan-code">${line.plan_code}</div>` : ""}
+    <div class="plan-meta-grid">
+      ${line.sale_plan_code ? `<div class="plan-row"><span>Từ kế hoạch trại</span><strong>${line.sale_plan_code}</strong></div>` : ""}
+      <div class="plan-row"><span>Ngày dự kiến</span><strong>${fmtIsoDate(line.planned_date)}</strong></div>
+      <div class="plan-row"><span>Số lượng</span><strong>${line.quantity} con</strong></div>
+      <div class="plan-row"><span>Giá chào bán</span><strong>${line.selling_price ? fmtPrice(line.selling_price) + " đ/kg" : "—"}</strong></div>
+      <div class="plan-row"><span>Giá hiện tại</span><strong>${curHtml}</strong></div>
+      ${diffHtml}
+      ${actualHtml}
+    </div>
+    ${line.note ? `<div class="plan-note">${line.note}</div>` : ""}
+    ${deliverySectionHtml(order, line)}
+    ${incidentSectionHtml(order, line)}
+    ${lineActions ? `<div class="plan-actions">${lineActions}</div>` : ""}
+  </article>`;
+}
+
+// Ứng viên action cho 1 đơn hàng — tái tạo đúng 9 điều kiện if-chain gốc
+// của renderOrders() cũ, giữ nguyên permission gate + status condition cho
+// từng nút, chỉ đổi cách gom lại thành mảng thay vì nối chuỗi HTML trực tiếp.
+function orderCandidateActions(o) {
+  const items = [];
+  if (o.status === "active" && CAN_CREATE_ALLOCATION) items.push({ label: "➕ Thêm dòng", cls: "order-btn-add-line" });
+  if (CAN_MANAGE_ALLOCATIONS && o.status === "active") items.push({ label: "✅ Đã bán", cls: "order-btn-done" });
+  if (o.status === "active" && CAN_ALLOC_SALE_DETAILS) items.push({ label: "🤝 Chốt bán hàng", cls: "order-btn-sale-details" });
+  if (o.status === "active" && CAN_ALLOC_SALE_DETAILS) items.push({ label: "⬇️ Xuất chào hàng", cls: "order-btn-quotation" });
+  if (o.status === "done" && CAN_ALLOC_REVENUE_DETAILS) items.push({ label: "💰 Ghi nhận doanh thu", cls: "order-btn-revenue" });
+  if (CAN_MANAGE_ALLOCATIONS && o.status === "active") items.push({ label: "🚫 Vô hiệu hoá", cls: "order-btn-disable", danger: true });
+  if (CAN_MANAGE_ALLOCATIONS && o.status === "disabled") items.push({ label: "▶️ Kích hoạt lại", cls: "order-btn-enable" });
+  if (o.status === "done" && !o.locked_at && CAN_LOCK_ORDER) items.push({ label: "🔒 Khoá đơn hàng", cls: "order-btn-lock" });
+  if (CAN_DELETE_ORDERS && !o.locked_at) items.push({ label: "🗑️ Xoá đơn", cls: "order-btn-delete", danger: true });
+  return items;
+}
+
+// 1 primary action/hàng — khuôn planPrimaryAction (plan.js), theo đúng thứ
+// tự ưu tiên khớp 4 bước của orderStepperHtml. "🔒 Khoá đơn hàng" KHÔNG nằm
+// trong bất kỳ nhánh nào ở đây → không bao giờ là primary, luôn rơi xuống
+// menu — đúng vì đây là hành động admin-only/hiếm dùng.
+function orderPrimaryAction(o) {
+  const hasSaleDetails = !!(o.customer_name || o.confirmed_sale_at || o.payment_method || o.delivery_time);
+  if (o.status === "active" && !hasSaleDetails && CAN_ALLOC_SALE_DETAILS) {
+    return { label: "🤝 Chốt bán hàng", cls: "order-btn-sale-details" };
+  }
+  if (o.status === "active" && hasSaleDetails && CAN_MANAGE_ALLOCATIONS) {
+    return { label: "✅ Đã bán", cls: "order-btn-done" };
+  }
+  if (o.status === "done" && !o.paid_amount && !o.invoice_number && CAN_ALLOC_REVENUE_DETAILS) {
+    return { label: "💰 Ghi nhận doanh thu", cls: "order-btn-revenue" };
+  }
+  if (o.status === "disabled" && CAN_MANAGE_ALLOCATIONS) {
+    return { label: "▶️ Kích hoạt lại", cls: "order-btn-enable" };
+  }
+  return null;
+}
+
+// Phần còn lại (không trùng primary) — vào action bar của modal chi tiết.
+function orderMenuActions(o) {
+  const primary = orderPrimaryAction(o);
+  return orderCandidateActions(o).filter((it) => !primary || it.cls !== primary.cls);
+}
+
+function applyOrderFilters(orders) {
+  const status = el("order-filter-status").value;
+  const q = el("order-filter-search").value.trim().toLowerCase();
+  return orders.filter((o) => {
+    if (status && o.status !== status) return false;
+    if (q) {
+      const lineHay = (o.lines || []).map((l) => `${l.farm || ""} ${l.pig_type_name || ""} ${l.plan_code || ""}`).join(" ");
+      const hay = `${o.order_code || ""} ${o.customer_name || ""} ${lineHay}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function orderRowHtml(o) {
+  const primary = orderPrimaryAction(o);
+  const primaryHtml = primary
+    ? `<button type="button" class="btn btn-primary btn-sm ${primary.cls}" data-id="${o.id}">${primary.label}</button>`
+    : "";
+  const totalQty = o.lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
+  const rowCls = o.status === "disabled" ? "plan-card-disabled" : "";
+  return `<tr class="${rowCls}" data-id="${o.id}">
+    <td data-label="Mã đơn hàng">${o.order_code || "#" + o.id}</td>
+    <td data-label="Trạng thái">${orderStatusBadge(o)}${o.locked_at ? " 🔒" : ""}</td>
+    <td data-label="Khách hàng">${o.customer_name || "—"}</td>
+    <td data-label="Dòng hàng">${o.lines.length} dòng · ${totalQty} con</td>
+    <td class="admin-table-actions">
+      ${primaryHtml}
+      <button type="button" class="btn btn-ghost btn-sm order-btn-detail" data-id="${o.id}">Chi tiết</button>
+    </td>
+  </tr>`;
+}
+
+function renderOrdersTable(orders) {
+  const tbody = el("order-list");
+  const emptyMsg = el("order-list-empty");
+  if (!tbody) return;
+  if (!orders.length) {
+    tbody.innerHTML = "";
+    if (emptyMsg) emptyMsg.classList.remove("hidden");
+    return;
+  }
+  if (emptyMsg) emptyMsg.classList.add("hidden");
+  tbody.innerHTML = orders.map(orderRowHtml).join("");
+}
+
+function refreshOrdersView() {
+  renderOrdersTable(applyOrderFilters(currentOrders));
+}
+
+// Body modal chi tiết — tái dùng nguyên orderStepperHtml/lineHtml (kèm
+// deliverySectionHtml/incidentSectionHtml bên trong nó); saleDetailsHtml/
+// revenueDetailsHtml/lockedBannerHtml là copy nguyên văn phần tương ứng của
+// renderOrders() cũ. Bọc trong <div class="order-card"> — bắt buộc:
+// handleOrderListClick's linesToggleBtn.closest(".order-card") cần 1 tổ
+// tiên chung giữa nút toggle và .order-lines.
+function orderDetailBodyHtml(o) {
+  const totalQty = o.lines.reduce((sum, l) => sum + (l.quantity || 0), 0);
+  const lockedBannerHtml = o.locked_at
+    ? `<div class="locked-banner">
+         <div>🔒 DỮ LIỆU ĐÃ KHÓA</div>
+         <div class="locked-banner-meta">Dữ liệu đã được chốt lúc ${o.locked_at}${o.locked_by ? " bởi " + o.locked_by : ""}. Dữ liệu không thể chỉnh sửa trực tiếp. Nếu phát hiện sai, ghi nhận qua "Heo loại/hủy".</div>
+       </div>`
+    : "";
+  const saleDetailsHtml =
+    o.customer_name || o.contact_note || o.confirmed_sale_at || o.delivery_time || o.payment_method
+      ? `<div class="plan-card-section">
+           <div class="plan-card-section-label">Thông tin bán hàng</div>
+           <div class="plan-meta-grid">
+             ${o.customer_name ? `<div class="plan-row"><span>Khách hàng</span><strong>${o.customer_name}${o.customer_phone ? " · " + o.customer_phone : ""}</strong></div>` : ""}
+             ${o.confirmed_sale_at ? `<div class="plan-row"><span>Ngày chốt bán</span><strong>${fmtIsoDate(o.confirmed_sale_at)}</strong></div>` : ""}
+             ${o.delivery_time ? `<div class="plan-row"><span>Khung giờ giao</span><strong>${o.delivery_time}</strong></div>` : ""}
+             ${o.payment_method ? `<div class="plan-row"><span>Thanh toán</span><strong>${ALLOC_PAYMENT_METHOD_LABEL[o.payment_method] || o.payment_method}</strong></div>` : ""}
+           </div>
+           ${o.contact_note ? `<div class="plan-note">Liên hệ (${o.contacted_by || "—"}): ${o.contact_note}</div>` : ""}
+         </div>`
+      : "";
+  const revenueDetailsHtml =
+    o.paid_amount || o.weighing_ref || o.invoice_number
+      ? `<div class="plan-card-section">
+           <div class="plan-card-section-label">Doanh thu / hoá đơn</div>
+           <div class="plan-meta-grid">
+             ${o.paid_amount ? `<div class="plan-row"><span>Đã thu tiền</span><strong>${fmtPrice(o.paid_amount)} đ${o.paid_at ? " · " + fmtIsoDate(o.paid_at.slice(0, 10)) : ""}</strong></div>` : ""}
+             ${o.weighing_ref ? `<div class="plan-row"><span>Chứng từ cân</span><strong>${o.weighing_ref}</strong></div>` : ""}
+             ${o.invoice_number ? `<div class="plan-row"><span>Số hoá đơn</span><strong>${o.invoice_number}${o.invoiced_by ? " · " + o.invoiced_by : ""}</strong></div>` : ""}
+           </div>
+         </div>`
+      : "";
+
+  return `<div class="order-card">
+    <div class="plan-card-head">
+      <strong>${o.order_code || "#" + o.id}</strong>
+      ${orderStatusBadge(o)}
+    </div>
+    ${orderStepperHtml(o)}
+    ${lockedBannerHtml}
+    ${saleDetailsHtml}
+    ${revenueDetailsHtml}
+    <button type="button" class="btn btn-ghost order-lines-toggle" data-id="${o.id}">
+      <span>📋 ${o.lines.length} dòng · ${totalQty} con</span><span class="toggle-caret">▾</span>
+    </button>
+    <div class="order-lines is-collapsed">${o.lines.map((line) => lineHtml(o, line)).join("")}</div>
+  </div>`;
+}
+
+function orderDetailActionsHtml(o) {
+  const primary = orderPrimaryAction(o);
+  const menu = orderMenuActions(o);
+  const all = [...(primary ? [primary] : []), ...menu];
+  if (!all.length) return "";
+  return all
+    .map((it) => {
+      const cls = it.danger ? "btn-danger" : primary && it.cls === primary.cls ? "btn-primary" : "btn-ghost";
+      return `<button type="button" class="btn ${cls} ${it.cls}" data-id="${o.id}">${it.label}</button>`;
+    })
+    .join("");
+}
+
+function openOrderDetailModal(orderId) {
+  const o = currentOrders.find((x) => String(x.id) === String(orderId));
+  if (!o) return;
+  detailModal({
+    title: o.order_code || "#" + o.id,
+    bodyHtml: orderDetailBodyHtml(o),
+    actionsHtml: orderDetailActionsHtml(o),
+  });
+}
+
+async function loadOrders() {
+  const box = el("order-list");
+  if (!box) return;
+  const res = await fetch("/api/orders");
+  const orders = await res.json();
+  // Nạp kèm incident (heo loại/hủy) của từng đơn — song song, không chặn
+  // nhau — để render breakdown ngay trong lineHtml() mà không cần request
+  // riêng lẻ khi mở từng đơn.
+  await Promise.all(
+    orders.map(async (o) => {
+      try {
+        const r = await fetch(`/api/orders/${o.id}/incidents`);
+        o.incidents = r.ok ? await r.json() : [];
+      } catch (err) {
+        o.incidents = [];
+      }
+      try {
+        const r = await fetch(`/api/orders/${o.id}/deliveries`);
+        o.deliveries = r.ok ? await r.json() : [];
+      } catch (err) {
+        o.deliveries = [];
+      }
+    })
+  );
+  currentOrders = orders;
+  refreshOrdersView();
+}
+
+async function setOrderStatus(orderId, status) {
+  const res = await fetch(`/api/orders/${orderId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
-    alert(payload.error || "Lỗi khi cập nhật kế hoạch bán.");
+    showToast(payload.error || "Lỗi khi cập nhật đơn hàng.", "danger");
     return;
   }
-  await loadAllocations();
+  await loadAvailablePlans();
+  await loadOrders();
 }
 
-let saleDetailsAllocationId = null;
+async function lockOrder(orderId, orderCode) {
+  const ok = await confirmModal({
+    title: "Khoá dữ liệu đơn hàng",
+    body: `Đơn hàng ${orderCode || "#" + orderId} sẽ bị khoá vĩnh viễn.`,
+    consequence:
+      "Sau khi khoá, dữ liệu không thể chỉnh sửa trực tiếp. Nếu phát hiện sai, ghi nhận qua \"Heo loại/hủy\" cho dòng liên quan thay vì sửa trực tiếp.",
+    confirmLabel: "Khoá dữ liệu",
+  });
+  if (!ok) return;
+  const res = await fetch(`/api/orders/${orderId}/lock`, { method: "PATCH" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(payload.error || "Lỗi khi khoá đơn hàng.", "danger");
+    return;
+  }
+  await loadOrders();
+}
 
-async function openSaleDetailsModal(allocationId, alloc) {
-  saleDetailsAllocationId = allocationId;
+async function removeOrderLine(orderId, lineId) {
+  const ok = await confirmModal({ title: "Xoá dòng hàng", body: "Xoá dòng này khỏi đơn hàng?", confirmLabel: "Xoá" });
+  if (!ok) return;
+  const res = await fetch(`/api/orders/${orderId}/lines/${lineId}`, { method: "DELETE" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(payload.error || "Lỗi khi xoá dòng.", "danger");
+    return;
+  }
+  await loadAvailablePlans();
+  await loadOrders();
+}
+
+async function deleteOrder(orderId) {
+  const ok = await confirmModal({
+    title: "Xoá đơn hàng",
+    body: "Xoá vĩnh viễn đơn hàng này?",
+    consequence: "Kèm toàn bộ dòng hàng, không thể hoàn tác.",
+    confirmLabel: "Xoá vĩnh viễn",
+  });
+  if (!ok) return;
+  const res = await fetch(`/api/orders/${orderId}`, { method: "DELETE" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(payload.error || "Lỗi khi xoá đơn hàng.", "danger");
+    return;
+  }
+  await loadAvailablePlans();
+  await loadOrders();
+}
+
+async function editLine(orderId, lineId) {
+  const order = currentOrders.find((o) => String(o.id) === String(orderId));
+  const line = order && order.lines.find((l) => String(l.id) === String(lineId));
+  if (!line) return;
+  const quantity = await promptModal({ title: "Sửa dòng hàng", label: "Số lượng (con)", inputType: "number", initialValue: line.quantity });
+  if (quantity === null) return;
+  const sellingPrice = await promptModal({ title: "Sửa dòng hàng", label: "Giá chào bán (đ/kg)", inputType: "number", initialValue: line.selling_price });
+  if (sellingPrice === null) return;
+  const note = await promptModal({ title: "Sửa dòng hàng", label: "Ghi chú", initialValue: line.note || "" });
+  if (note === null) return;
+  const res = await fetch(`/api/orders/${orderId}/lines/${lineId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ quantity, selling_price: sellingPrice, note }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(payload.error || "Lỗi khi sửa dòng hàng.", "danger");
+    return;
+  }
+  await loadAvailablePlans();
+  await loadOrders();
+}
+
+// ---- Modal Đánh dấu Đã bán (nhiều dòng) ----
+
+let markDoneOrderId = null;
+
+function openMarkDoneModal(orderId) {
+  const order = currentOrders.find((o) => String(o.id) === String(orderId));
+  if (!order) return;
+  markDoneOrderId = orderId;
+  el("md-lines").innerHTML = order.lines
+    .map(
+      (line) => `<div class="control-row">
+        <label>${line.pig_type_name || "—"} (${line.plan_code || "#" + line.id})</label>
+      </div>
+      <div class="control-row">
+        <label for="md-price-${line.id}">Giá bán thực tế (đ/kg)</label>
+        <input type="number" id="md-price-${line.id}" min="0" step="1000" value="${line.selling_price || ""}">
+      </div>
+      <div class="control-row">
+        <label for="md-qty-${line.id}">Số lượng bán thực tế (con)</label>
+        <input type="number" id="md-qty-${line.id}" min="1" step="1" value="${line.quantity || ""}">
+      </div>`
+    )
+    .join("");
+  el("md-msg").className = "msg";
+  el("md-msg").textContent = "";
+  el("mark-done-modal").classList.remove("hidden");
+}
+
+function closeMarkDoneModal() {
+  markDoneOrderId = null;
+  el("mark-done-modal").classList.add("hidden");
+}
+
+async function saveMarkDone() {
+  const order = currentOrders.find((o) => String(o.id) === String(markDoneOrderId));
+  if (!order) return;
+  const lines = order.lines.map((line) => ({
+    allocation_id: line.id,
+    actual_price: el(`md-price-${line.id}`).value,
+    actual_quantity: el(`md-qty-${line.id}`).value,
+  }));
+  const res = await fetch(`/api/orders/${markDoneOrderId}/mark-done`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lines }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    el("md-msg").className = "msg error";
+    el("md-msg").textContent = payload.error || "Lỗi khi đánh dấu Đã bán.";
+    return;
+  }
+  closeMarkDoneModal();
+  await loadOrders();
+}
+
+// ---- Modal Chốt bán hàng ----
+
+let saleDetailsOrderId = null;
+
+async function openSaleDetailsModal(orderId, order) {
+  saleDetailsOrderId = orderId;
   const res = await fetch("/api/customers?active_only=true");
   const customers = await res.json();
   const select = el("sd-customer");
@@ -224,21 +952,20 @@ async function openSaleDetailsModal(allocationId, alloc) {
     customers
       .map(
         (c) =>
-          `<option value="${c.id}" ${alloc.customer_id === c.id ? "selected" : ""}>${c.name}${c.phone ? " · " + c.phone : ""}</option>`
+          `<option value="${c.id}" ${order.customer_id === c.id ? "selected" : ""}>${c.name}${c.phone ? " · " + c.phone : ""}</option>`
       )
       .join("");
   el("sd-contact-note").value = "";
-  el("sd-confirmed-date").value = alloc.confirmed_sale_at || "";
-  el("sd-selling-price").value = alloc.selling_price || "";
-  el("sd-delivery-time").value = alloc.delivery_time || "";
-  el("sd-payment-method").value = alloc.payment_method || "";
+  el("sd-confirmed-date").value = order.confirmed_sale_at || "";
+  el("sd-delivery-time").value = order.delivery_time || "";
+  el("sd-payment-method").value = order.payment_method || "";
   el("sd-msg").className = "msg";
   el("sd-msg").textContent = "";
   el("sale-details-modal").classList.remove("hidden");
 }
 
 function closeSaleDetailsModal() {
-  saleDetailsAllocationId = null;
+  saleDetailsOrderId = null;
   el("sale-details-modal").classList.add("hidden");
 }
 
@@ -247,11 +974,10 @@ async function saveSaleDetails() {
     customer_id: el("sd-customer").value || null,
     contact_note: el("sd-contact-note").value,
     confirmed_sale_at: el("sd-confirmed-date").value || null,
-    selling_price: el("sd-selling-price").value || null,
     delivery_time: el("sd-delivery-time").value,
     payment_method: el("sd-payment-method").value || null,
   };
-  const res = await fetch(`/api/allocations/${saleDetailsAllocationId}/sale-details`, {
+  const res = await fetch(`/api/orders/${saleDetailsOrderId}/sale-details`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -263,23 +989,25 @@ async function saveSaleDetails() {
     return;
   }
   closeSaleDetailsModal();
-  await loadAllocations();
+  await loadOrders();
 }
 
-let revenueAllocationId = null;
+// ---- Modal Ghi nhận doanh thu ----
 
-async function openRevenueModal(allocationId, alloc) {
-  revenueAllocationId = allocationId;
-  el("rv-paid-amount").value = alloc.paid_amount || "";
-  el("rv-weighing-ref").value = alloc.weighing_ref || "";
-  el("rv-invoice-number").value = alloc.invoice_number || "";
+let revenueOrderId = null;
+
+async function openRevenueModal(orderId, order) {
+  revenueOrderId = orderId;
+  el("rv-paid-amount").value = order.paid_amount || "";
+  el("rv-weighing-ref").value = order.weighing_ref || "";
+  el("rv-invoice-number").value = order.invoice_number || "";
   el("rv-msg").className = "msg";
   el("rv-msg").textContent = "";
   el("revenue-modal").classList.remove("hidden");
 }
 
 function closeRevenueModal() {
-  revenueAllocationId = null;
+  revenueOrderId = null;
   el("revenue-modal").classList.add("hidden");
 }
 
@@ -289,7 +1017,7 @@ async function saveRevenueDetails() {
     weighing_ref: el("rv-weighing-ref").value,
     invoice_number: el("rv-invoice-number").value,
   };
-  const res = await fetch(`/api/allocations/${revenueAllocationId}/revenue-details`, {
+  const res = await fetch(`/api/orders/${revenueOrderId}/revenue-details`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -301,44 +1029,360 @@ async function saveRevenueDetails() {
     return;
   }
   closeRevenueModal();
-  await loadAllocations();
+  await loadOrders();
 }
 
-async function handleAllocationListClick(e) {
-  const doneBtn = e.target.closest(".alloc-btn-done");
-  const disableBtn = e.target.closest(".alloc-btn-disable");
-  const enableBtn = e.target.closest(".alloc-btn-enable");
-  const saleDetailsBtn = e.target.closest(".alloc-btn-sale-details");
-  const revenueBtn = e.target.closest(".alloc-btn-revenue");
-  const quotationBtn = e.target.closest(".alloc-btn-quotation");
-  if (doneBtn) {
-    await markAllocationDone(doneBtn.dataset.id);
+// ---- Modal Ghi nhận heo Loại/Hủy ----
+
+let incidentTargetOrderId = null;
+let incidentTargetLineId = null;
+let incidentKind = null;
+
+function openIncidentModal(orderId, lineId) {
+  incidentTargetOrderId = orderId;
+  incidentTargetLineId = lineId;
+  incidentKind = null;
+  el("ic-kind-culled").className = "btn btn-ghost";
+  el("ic-kind-cancelled").className = "btn btn-ghost";
+  el("ic-quantity").value = "";
+  el("ic-photos").value = "";
+  el("ic-description").value = "";
+  el("ic-msg").className = "msg";
+  el("ic-msg").textContent = "";
+  el("incident-modal").classList.remove("hidden");
+}
+
+function closeIncidentModal() {
+  incidentTargetOrderId = null;
+  incidentTargetLineId = null;
+  incidentKind = null;
+  el("incident-modal").classList.add("hidden");
+}
+
+function selectIncidentKind(kind) {
+  incidentKind = kind;
+  el("ic-kind-culled").className = "btn " + (kind === "culled" ? "btn-primary" : "btn-ghost");
+  el("ic-kind-cancelled").className = "btn " + (kind === "cancelled" ? "btn-primary" : "btn-ghost");
+}
+
+async function saveIncident() {
+  const msg = el("ic-msg");
+  msg.className = "msg";
+  if (!incidentKind) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng chọn Loại hoặc Hủy.";
+    return;
+  }
+  const quantity = el("ic-quantity").value;
+  if (!quantity || Number(quantity) <= 0) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng nhập số lượng hợp lệ.";
+    return;
+  }
+  const photos = el("ic-photos").files;
+  if (!photos || photos.length === 0) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng chụp/chọn ít nhất 1 ảnh làm bằng chứng.";
+    return;
+  }
+  const description = el("ic-description").value.trim();
+  if (!description) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng nhập lý do.";
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("kind", incidentKind);
+  formData.append("quantity", quantity);
+  formData.append("description", description);
+  for (const file of photos) formData.append("photos", file);
+
+  msg.textContent = "Đang lưu...";
+  try {
+    const res = await fetch(`/api/orders/${incidentTargetOrderId}/lines/${incidentTargetLineId}/incidents`, {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msg.className = "msg error";
+      msg.textContent = payload.error || "Lỗi khi ghi nhận.";
+      return;
+    }
+  } catch (err) {
+    msg.className = "msg error";
+    msg.textContent = "Lỗi khi lưu: " + err;
+    return;
+  }
+  closeIncidentModal();
+  await loadOrders();
+}
+
+// ---- Ghi nhận xuất giao thực tế (sale_deliveries) ----
+// Gửi JSON (không multipart — route deliveries.py không nhận ảnh), khác
+// saveIncident() ở trên. Loại heo cho phép chọn KHÁC loại kế hoạch của dòng
+// hàng (mặc định preselect đúng loại kế hoạch cho trường hợp phổ biến không
+// lệch cơ cấu).
+let deliveryTargetOrderId = null;
+let deliveryTargetLineId = null;
+
+async function openDeliveryModal(orderId, lineId) {
+  const order = currentOrders.find((o) => String(o.id) === String(orderId));
+  const line = order && order.lines.find((l) => String(l.id) === String(lineId));
+  if (!line) return;
+  deliveryTargetOrderId = orderId;
+  deliveryTargetLineId = lineId;
+
+  const select = el("dv-pig-type");
+  select.innerHTML = `<option value="">Đang tải...</option>`;
+  el("delivery-modal").classList.remove("hidden");
+  try {
+    const res = await fetch("/api/pig-types");
+    const pigTypes = await res.json();
+    select.innerHTML = pigTypes.map((pt) => `<option value="${pt.id}">${pt.name}</option>`).join("");
+    if (line.pig_type_id !== null && line.pig_type_id !== undefined) select.value = String(line.pig_type_id);
+  } catch (err) {
+    select.innerHTML = `<option value="">Lỗi tải danh mục loại heo</option>`;
+  }
+
+  el("dv-quantity").value = "";
+  el("dv-weight").value = "";
+  el("dv-price").value = "";
+  el("dv-date").value = new Date().toISOString().slice(0, 10);
+  el("dv-weighing-ref").value = "";
+  el("dv-note").value = "";
+  el("dv-msg").className = "msg";
+  el("dv-msg").textContent = "";
+}
+
+function closeDeliveryModal() {
+  deliveryTargetOrderId = null;
+  deliveryTargetLineId = null;
+  el("delivery-modal").classList.add("hidden");
+}
+
+async function saveDelivery() {
+  const msg = el("dv-msg");
+  msg.className = "msg";
+  const pigTypeId = el("dv-pig-type").value;
+  if (!pigTypeId) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng chọn loại heo thực tế.";
+    return;
+  }
+  const quantity = el("dv-quantity").value;
+  if (!quantity || Number(quantity) <= 0) {
+    msg.className = "msg error";
+    msg.textContent = "Vui lòng nhập số lượng hợp lệ.";
+    return;
+  }
+
+  const body = {
+    pig_type_id: Number(pigTypeId),
+    quantity: Number(quantity),
+    delivered_date: el("dv-date").value || undefined,
+  };
+  if (el("dv-weight").value) body.total_weight_kg = Number(el("dv-weight").value);
+  if (el("dv-price").value) body.unit_price = Number(el("dv-price").value);
+  if (el("dv-weighing-ref").value.trim()) body.weighing_ref = el("dv-weighing-ref").value.trim();
+  if (el("dv-note").value.trim()) body.note = el("dv-note").value.trim();
+
+  msg.textContent = "Đang lưu...";
+  try {
+    const res = await fetch(`/api/orders/${deliveryTargetOrderId}/lines/${deliveryTargetLineId}/deliveries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      msg.className = "msg error";
+      msg.textContent = payload.error || "Lỗi khi ghi nhận xuất giao.";
+      return;
+    }
+  } catch (err) {
+    msg.className = "msg error";
+    msg.textContent = "Lỗi khi lưu: " + err;
+    return;
+  }
+  closeDeliveryModal();
+  showToast("Đã ghi nhận xuất giao.", "success");
+  await loadAvailablePlans();
+  await loadOrders();
+}
+
+async function deleteDelivery(deliveryId) {
+  const ok = await confirmModal({
+    title: "Xoá bản ghi xuất giao?",
+    body: "Bản ghi xuất giao này sẽ bị xoá. Số lượng/giá bán thực tế của dòng hàng sẽ được tính lại.",
+    confirmLabel: "Xoá",
+  });
+  if (!ok) return;
+  const res = await fetch(`/api/deliveries/${deliveryId}`, { method: "DELETE" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(payload.error || "Lỗi khi xoá bản ghi xuất giao.", "danger");
+    return;
+  }
+  await loadAvailablePlans();
+  await loadOrders();
+}
+
+// ---- Click delegation ----
+
+function handleAvailablePlansClick(e) {
+  const pickBtn = e.target.closest(".btn-pick-plan");
+  if (pickBtn) pickPlan(pickBtn.dataset.id);
+}
+
+function handleDraftCartClick(e) {
+  const removeBtn = e.target.closest(".btn-remove-draft-line");
+  if (removeBtn) removeDraftLine(removeBtn.dataset.index);
+}
+
+async function handleOrderListClick(e) {
+  // Action bấm từ trong modal chi tiết đang mở → đóng modal trước khi
+  // dispatch (trừ khi chính nút Đóng gây ra click này) — xem lý do z-index
+  // ở plan.js's handlePlanListClick (áp dụng y hệt cho 5 modal tĩnh ở trang
+  // này: #sale-details-modal/#revenue-modal/#mark-done-modal/
+  // #delivery-modal/#incident-modal).
+  const dm = e.target.closest(".detail-modal");
+  if (dm && !e.target.closest(".detail-modal-close") && dm._detailModalClose) {
+    dm._detailModalClose();
+  }
+
+  const detailBtn = e.target.closest(".order-btn-detail");
+  const doneBtn = e.target.closest(".order-btn-done");
+  const disableBtn = e.target.closest(".order-btn-disable");
+  const enableBtn = e.target.closest(".order-btn-enable");
+  const addLineBtn = e.target.closest(".order-btn-add-line");
+  const saleDetailsBtn = e.target.closest(".order-btn-sale-details");
+  const revenueBtn = e.target.closest(".order-btn-revenue");
+  const quotationBtn = e.target.closest(".order-btn-quotation");
+  const removeLineBtn = e.target.closest(".btn-remove-line");
+  const deleteOrderBtn = e.target.closest(".order-btn-delete");
+  const lockOrderBtn = e.target.closest(".order-btn-lock");
+  const editLineBtn = e.target.closest(".btn-edit-line");
+  const addIncidentBtn = e.target.closest(".btn-add-incident");
+  const addDeliveryBtn = e.target.closest(".btn-add-delivery");
+  const deleteDeliveryBtn = e.target.closest(".btn-delete-delivery");
+  const linesToggleBtn = e.target.closest(".order-lines-toggle");
+
+  if (detailBtn) {
+    openOrderDetailModal(detailBtn.dataset.id);
+    return;
+  }
+
+  if (linesToggleBtn) {
+    const linesEl = linesToggleBtn.closest(".order-card").querySelector(".order-lines");
+    linesEl.classList.toggle("is-collapsed");
+    linesToggleBtn.classList.toggle("is-expanded");
+  } else if (doneBtn) {
+    openMarkDoneModal(doneBtn.dataset.id);
   } else if (disableBtn) {
-    if (!confirm("Vô hiệu hoá kế hoạch bán này? Bạn có thể kích hoạt lại bất cứ lúc nào.")) return;
-    await setAllocationStatus(disableBtn.dataset.id, "disabled");
+    const ok = await confirmModal({
+      title: "Vô hiệu hoá đơn hàng",
+      body: "Vô hiệu hoá đơn hàng này? Bạn có thể kích hoạt lại bất cứ lúc nào.",
+      confirmLabel: "Vô hiệu hoá",
+    });
+    if (!ok) return;
+    await setOrderStatus(disableBtn.dataset.id, "disabled");
   } else if (enableBtn) {
-    await setAllocationStatus(enableBtn.dataset.id, "active");
+    await setOrderStatus(enableBtn.dataset.id, "active");
+  } else if (addLineBtn) {
+    startAddLineToOrder(addLineBtn.dataset.id);
   } else if (saleDetailsBtn) {
-    const alloc = currentAllocations.find((a) => String(a.id) === saleDetailsBtn.dataset.id);
-    if (alloc) await openSaleDetailsModal(saleDetailsBtn.dataset.id, alloc);
+    const order = currentOrders.find((o) => String(o.id) === saleDetailsBtn.dataset.id);
+    if (order) await openSaleDetailsModal(saleDetailsBtn.dataset.id, order);
   } else if (revenueBtn) {
-    const alloc = currentAllocations.find((a) => String(a.id) === revenueBtn.dataset.id);
-    if (alloc) await openRevenueModal(revenueBtn.dataset.id, alloc);
+    const order = currentOrders.find((o) => String(o.id) === revenueBtn.dataset.id);
+    if (order) await openRevenueModal(revenueBtn.dataset.id, order);
   } else if (quotationBtn) {
-    window.open(`/api/allocations/quotation.xlsx?ids=${quotationBtn.dataset.id}`, "_blank");
+    window.open(`/api/orders/quotation.xlsx?ids=${quotationBtn.dataset.id}`, "_blank");
+  } else if (removeLineBtn) {
+    await removeOrderLine(removeLineBtn.dataset.orderId, removeLineBtn.dataset.lineId);
+  } else if (deleteOrderBtn) {
+    await deleteOrder(deleteOrderBtn.dataset.id);
+  } else if (lockOrderBtn) {
+    const order = currentOrders.find((o) => String(o.id) === lockOrderBtn.dataset.id);
+    await lockOrder(lockOrderBtn.dataset.id, order && order.order_code);
+  } else if (editLineBtn) {
+    await editLine(editLineBtn.dataset.orderId, editLineBtn.dataset.lineId);
+  } else if (addIncidentBtn) {
+    openIncidentModal(addIncidentBtn.dataset.orderId, addIncidentBtn.dataset.lineId);
+  } else if (addDeliveryBtn) {
+    await openDeliveryModal(addDeliveryBtn.dataset.orderId, addDeliveryBtn.dataset.lineId);
+  } else if (deleteDeliveryBtn) {
+    await deleteDelivery(deleteDeliveryBtn.dataset.id);
   }
 }
 
-if (el("allocation-form")) el("allocation-form").addEventListener("submit", submitAllocation);
-if (el("allocation-list")) el("allocation-list").addEventListener("click", handleAllocationListClick);
-if (el("alloc-sale-plan")) el("alloc-sale-plan").addEventListener("change", updateRemainingHint);
+if (el("line-form")) el("line-form").addEventListener("submit", handleLineFormSubmit);
+if (el("line-cancel-target")) el("line-cancel-target").addEventListener("click", cancelAddLineTarget);
+if (el("line-sale-plan")) el("line-sale-plan").addEventListener("change", updateRemainingHint);
+if (el("line-quantity")) el("line-quantity").addEventListener("input", computeQuantityFeedback);
+if (el("line-selling-price")) {
+  el("line-selling-price").addEventListener("input", (e) => {
+    const input = e.target;
+    const digitsBeforeCursor = input.value.slice(0, input.selectionStart).replace(/\D/g, "").length;
+    input.value = formatPriceInputValue(input.value);
+    // Đặt lại con trỏ theo số chữ số đã gõ trước đó (không tính dấu chấm ngăn
+    // cách vừa chèn thêm), để gõ tiếp không bị nhảy vị trí.
+    let pos = 0;
+    let digitsSeen = 0;
+    while (pos < input.value.length && digitsSeen < digitsBeforeCursor) {
+      if (/\d/.test(input.value[pos])) digitsSeen++;
+      pos++;
+    }
+    input.setSelectionRange(pos, pos);
+  });
+}
+if (el("btn-create-order")) el("btn-create-order").addEventListener("click", createOrderFromDraft);
+if (el("draft-cart-list")) el("draft-cart-list").addEventListener("click", handleDraftCartClick);
+document.body.addEventListener("click", handleOrderListClick);
+if (el("available-plans-list")) el("available-plans-list").addEventListener("click", handleAvailablePlansClick);
+if (el("md-save")) el("md-save").addEventListener("click", saveMarkDone);
+if (el("md-cancel")) el("md-cancel").addEventListener("click", closeMarkDoneModal);
 if (el("sd-save")) el("sd-save").addEventListener("click", saveSaleDetails);
 if (el("sd-cancel")) el("sd-cancel").addEventListener("click", closeSaleDetailsModal);
 if (el("rv-save")) el("rv-save").addEventListener("click", saveRevenueDetails);
 if (el("rv-cancel")) el("rv-cancel").addEventListener("click", closeRevenueModal);
+if (el("ic-save")) el("ic-save").addEventListener("click", saveIncident);
+if (el("ic-cancel")) el("ic-cancel").addEventListener("click", closeIncidentModal);
+if (el("ic-kind-culled")) el("ic-kind-culled").addEventListener("click", () => selectIncidentKind("culled"));
+if (el("ic-kind-cancelled")) el("ic-kind-cancelled").addEventListener("click", () => selectIncidentKind("cancelled"));
+if (el("dv-save")) el("dv-save").addEventListener("click", saveDelivery);
+if (el("dv-cancel")) el("dv-cancel").addEventListener("click", closeDeliveryModal);
 
-if (el("allocation-list")) {
-  (async function initAllocations() {
-    await loadAllocations();
+["filter-farm", "filter-pig-type", "filter-date-from", "filter-date-to", "filter-status"].forEach((id) => {
+  if (el(id)) el(id).addEventListener("change", refreshAvailablePlansView);
+});
+if (el("filter-search")) el("filter-search").addEventListener("input", refreshAvailablePlansView);
+if (el("order-filter-status")) el("order-filter-status").addEventListener("change", refreshOrdersView);
+if (el("order-filter-search")) el("order-filter-search").addEventListener("input", refreshOrdersView);
+
+// Đến từ link "Cần xử lý" trên Tổng quan (?highlight=<id>) — scroll tới
+// đúng dòng bảng + tô sáng tạm thời rồi mở luôn modal chi tiết, theo yêu
+// cầu exception-first UX của brief (dòng rút gọn không còn đủ thông tin
+// như card cũ). Trang này không có case ?action=reconcile (chỉ có ở Kế
+// hoạch trại).
+function highlightFromQuery() {
+  const id = new URLSearchParams(location.search).get("highlight");
+  if (!id) return;
+  const row = document.querySelector(`#order-list tr[data-id="${id}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.add("is-highlighted");
+  setTimeout(() => row.classList.remove("is-highlighted"), 3000);
+  openOrderDetailModal(id);
+}
+
+if (el("order-list")) {
+  (async function initOrders() {
+    renderDraftCart();
+    await loadAvailablePlans();
+    await loadOrders();
+    highlightFromQuery();
   })();
 }

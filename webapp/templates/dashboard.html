@@ -1,32 +1,120 @@
 {% extends "base.html" %}
 {% block title %}Tổng quan{% endblock %}
+{% block extra_head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>{% endblock %}
 {% block brand_title %}🐷 Tổng quan{% endblock %}
 {% block brand_sub %}Số liệu chính của quy trình bán heo{% endblock %}
 
 {% block content %}
   <section class="card">
-    <h2>Số liệu chính</h2>
-    <div class="kpi-grid">
-      <div class="kpi-tile kpi-pending">
-        <div class="kpi-label">Chờ duyệt</div>
-        <div class="kpi-value">{{ stats.pending_approval }}<span class="unit">kế hoạch</span></div>
+    <div class="section-head">
+      <h2>Kế hoạch → Thực tế</h2>
+      <div class="control-row">
+        <label for="dashboard-days">Nhìn lại</label>
+        <select id="dashboard-days">
+          <option value="7">7 ngày qua</option>
+          <option value="30" selected>30 ngày qua</option>
+          <option value="90">90 ngày qua</option>
+        </select>
       </div>
-      <div class="kpi-tile kpi-approved">
-        <div class="kpi-label">Đã duyệt, chưa bán</div>
-        <div class="kpi-value">{{ stats.approved_not_sold }}<span class="unit">kế hoạch</span></div>
+    </div>
+    <p class="dashboard-intro">Kèm kế hoạch đã lên lịch gần đây (tới 7 ngày tới) để không bỏ sót lô hàng sắp xuất.</p>
+    <div class="kpi-grid kpi-grid-primary">
+      <div class="kpi-tile kpi-planned">
+        <div class="kpi-label">Kế hoạch bán</div>
+        <div class="kpi-value" id="kpi-planned-value">—<span class="unit">con</span></div>
       </div>
-      <div class="kpi-tile kpi-sold">
-        <div class="kpi-label">Đã bán trong tháng</div>
-        <div class="kpi-value">{{ stats.sold_this_month }}<span class="unit">kế hoạch</span></div>
+      <div class="kpi-tile kpi-allocated">
+        <div class="kpi-label">Đã chốt bán</div>
+        <div class="kpi-value" id="kpi-allocated-value">—<span class="unit">con</span></div>
+        <div class="kpi-sub" id="kpi-allocated-sub"></div>
       </div>
-      {% if current_user_can('plans.revenue_details') %}
-      <div class="kpi-tile kpi-revenue">
-        <div class="kpi-label">Doanh thu đã thu (tháng này)</div>
-        <div class="kpi-value">{{ stats.revenue_this_month_fmt }}<span class="unit">đ</span></div>
+      <div class="kpi-tile kpi-actual">
+        <div class="kpi-label">Đã xuất thực tế</div>
+        <div class="kpi-value" id="kpi-actual-value">—<span class="unit">con</span></div>
+        <div class="kpi-sub" id="kpi-actual-sub"></div>
       </div>
-      {% endif %}
+      <div class="kpi-tile kpi-not-shipped">
+        <div class="kpi-label">Chưa xuất</div>
+        <div class="kpi-value" id="kpi-not-shipped-value">—<span class="unit">con</span></div>
+        <div class="kpi-sub" id="kpi-not-shipped-sub"></div>
+      </div>
+      <div class="kpi-tile kpi-variance">
+        <div class="kpi-label">Sai lệch</div>
+        <div class="kpi-value" id="kpi-variance-value">—<span class="unit">con</span></div>
+        <div class="kpi-sub" id="kpi-variance-sub"></div>
+      </div>
     </div>
   </section>
+
+  <div class="dashboard-charts-row">
+    <section class="card chart-section">
+  <h2>Tình hình bán hàng</h2>
+
+  <div id="trend-chart-empty" class="empty-state hidden">
+    <div class="empty-state-title">Chưa có dữ liệu</div>
+    <div class="empty-state-desc">
+      Chưa có dữ liệu bán hàng trong khoảng thời gian đã chọn.
+    </div>
+  </div>
+
+  <canvas id="trend-chart"></canvas>
+    </section>
+
+    <section class="card chart-section">
+  <h2>Cơ cấu loại heo (thực tế đã xuất)</h2>
+
+  <canvas id="composition-chart"></canvas>
+
+  <p id="composition-empty" class="msg hidden">
+    Chưa có dữ liệu xuất giao trong khoảng đã chọn.
+  </p>
+    </section>
+  </div>
+
+  <div class="dashboard-lower-row">
+    <section class="card table-wrap">
+      <h2>Kế hoạch - Chốt - Xuất theo ngày</h2>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Ngày dự kiến</th>
+              <th>Kế hoạch (con)</th>
+              <th>Đã chốt (con)</th>
+              <th>Đã xuất (con)</th>
+              <th>Lệch (con)</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody id="daily-table-body"></tbody>
+        </table>
+      </div>
+      <p id="daily-table-empty" class="msg hidden">Không có kế hoạch nào trong khoảng đã chọn.</p>
+    </section>
+
+    {% if exceptions %}
+    <section class="card">
+      <h2>⚠️ Cần xử lý</h2>
+      {% for ex in exceptions %}
+      <div class="alert alert-warning exception-group">
+        <div class="exception-group-title">{{ ex.icon }} {{ ex.text }}</div>
+        <div class="exception-items">
+          {% for it in ex.entries %}
+          <a class="exception-item-link" href="{{ it.url }}">{{ it.label }} →</a>
+          {% endfor %}
+          {% if ex.total > ex.entries|length %}
+          <a class="exception-item-link" href="{{ ex.more_url }}">+{{ ex.total - ex.entries|length }} khác, xem tất cả →</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% else %}
+    <section class="card">
+      <p class="msg">✓ Không có việc gì cần xử lý ngay.</p>
+    </section>
+    {% endif %}
+  </div>
 
   <section class="card">
     <h2>Quy trình xuất bán</h2>
@@ -50,4 +138,9 @@
       <a class="btn btn-ghost" href="{{ url_for('prices.price_page') }}">📈 Giá heo tham khảo</a>
     </div>
   </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

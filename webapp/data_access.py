@@ -4,15 +4,20 @@ import pandas as pd
 from core.repositories import (
     customers_repo,
     farms_repo,
+    incident_repo,
+    media_repo,
     pig_types_repo,
+    plan_reconciliation_repo,
     prices_repo,
     roles_repo,
-    sale_allocations_repo,
+    sale_deliveries_repo,
+    sale_orders_repo,
     sale_plans_repo,
     users_repo,
+    weighing_repo,
 )
 from core.services import export_service
-from extensions import DB_PATH, db_lock
+from extensions import DB_PATH, MEDIA_ROOT, db_lock
 
 
 def load_df() -> pd.DataFrame:
@@ -55,53 +60,79 @@ def update_plan_received_quantity_locked(plan_id: int, received_quantity: int, i
         sale_plans_repo.update_plan_received_quantity(plan_id, received_quantity, DB_PATH, ip, username)
 
 
-def create_allocation_locked(alloc: dict, ip: str | None, username: str | None) -> int:
+def update_sale_plan_edit_locked(plan_id: int, plan: dict, ip: str | None, username: str | None) -> bool:
     with db_lock:
-        return sale_allocations_repo.create_allocation(alloc, DB_PATH, ip, username)
+        return sale_plans_repo.update_sale_plan_edit(plan_id, plan, DB_PATH, ip, username)
 
 
-def get_allocation_locked(allocation_id: int) -> dict | None:
+def delete_plan_locked(plan_id: int) -> bool:
     with db_lock:
-        return sale_allocations_repo.get_allocation(allocation_id, DB_PATH)
+        return sale_plans_repo.delete_sale_plan(plan_id, DB_PATH)
 
 
-def list_allocations_locked(sale_plan_id: int | None = None) -> list[dict]:
+def create_order_locked(lines: list[dict], ip: str | None, username: str | None) -> int:
     with db_lock:
-        return sale_allocations_repo.list_allocations(DB_PATH, sale_plan_id=sale_plan_id)
+        return sale_orders_repo.create_order(lines, DB_PATH, ip, username)
 
 
-def list_allocations_for_export_locked() -> list[dict]:
+def add_order_line_locked(order_id: int, line: dict, ip: str | None, username: str | None) -> int:
     with db_lock:
-        return sale_allocations_repo.list_allocations_for_export(DB_PATH)
+        return sale_orders_repo.add_order_line(order_id, line, DB_PATH, ip, username)
 
 
-def update_allocation_status_locked(
-    allocation_id: int,
-    status: str,
-    ip: str | None,
-    username: str | None,
-    actual_price: int | None = None,
-    actual_quantity: int | None = None,
-) -> None:
+def remove_order_line_locked(order_id: int, allocation_id: int, ip: str | None, username: str | None) -> bool:
     with db_lock:
-        sale_allocations_repo.update_allocation_status(
-            allocation_id, status, DB_PATH, ip, username, actual_price, actual_quantity
-        )
+        return sale_orders_repo.remove_order_line(order_id, allocation_id, DB_PATH, ip, username)
 
 
-def update_allocation_sale_details_locked(allocation_id: int, ip: str | None, username: str | None, fields: dict) -> None:
+def get_order_locked(order_id: int) -> dict | None:
     with db_lock:
-        sale_allocations_repo.update_allocation_sale_details(allocation_id, DB_PATH, ip, username, fields)
+        return sale_orders_repo.get_order(order_id, DB_PATH)
 
 
-def update_allocation_revenue_details_locked(allocation_id: int, ip: str | None, username: str | None, fields: dict) -> None:
+def list_orders_locked() -> list[dict]:
     with db_lock:
-        sale_allocations_repo.update_allocation_revenue_details(allocation_id, DB_PATH, ip, username, fields)
+        return sale_orders_repo.list_orders(DB_PATH)
 
 
-def count_allocations_for_customer_locked(customer_id: int) -> int:
+def list_orders_for_export_locked() -> list[dict]:
     with db_lock:
-        return sale_allocations_repo.count_allocations_for_customer(customer_id, DB_PATH)
+        return sale_orders_repo.list_orders_for_export(DB_PATH)
+
+
+def update_order_status_locked(order_id: int, status: str, ip: str | None, username: str | None) -> None:
+    with db_lock:
+        sale_orders_repo.update_order_status(order_id, status, DB_PATH, ip, username)
+
+
+def mark_order_done_locked(order_id: int, line_actuals: list[dict], ip: str | None, username: str | None) -> None:
+    with db_lock:
+        sale_orders_repo.mark_order_done(order_id, line_actuals, DB_PATH, ip, username)
+
+
+def update_order_sale_details_locked(order_id: int, ip: str | None, username: str | None, fields: dict) -> None:
+    with db_lock:
+        sale_orders_repo.update_order_sale_details(order_id, DB_PATH, ip, username, fields)
+
+
+def update_order_revenue_details_locked(order_id: int, ip: str | None, username: str | None, fields: dict) -> None:
+    with db_lock:
+        sale_orders_repo.update_order_revenue_details(order_id, DB_PATH, ip, username, fields)
+
+
+def count_orders_for_customer_locked(customer_id: int) -> int:
+    with db_lock:
+        return sale_orders_repo.count_orders_for_customer(customer_id, DB_PATH)
+
+
+def update_order_line_locked(allocation_id: int, ip: str | None, username: str | None, fields: dict) -> bool:
+    with db_lock:
+        return sale_orders_repo.update_order_line(allocation_id, DB_PATH, ip, username, fields)
+
+
+def delete_order_locked(order_id: int) -> tuple[bool, str | None]:
+    with db_lock:
+        return sale_orders_repo.delete_order(order_id, DB_PATH)
 
 
 def list_customers_locked(active_only: bool = False) -> list[dict]:
@@ -242,14 +273,34 @@ def count_plans_for_pig_type_locked(pig_type_id: int) -> int:
         return sale_plans_repo.count_plans_for_pig_type(pig_type_id, DB_PATH)
 
 
-def dashboard_stats_locked(farm_ids: list[int] | None = None) -> dict:
+def dashboard_summary_locked(farm_ids: list[int] | None = None, days: int = 30) -> dict:
     with db_lock:
-        return sale_plans_repo.dashboard_stats(DB_PATH, farm_ids=farm_ids)
+        return sale_plans_repo.dashboard_summary(DB_PATH, farm_ids=farm_ids, days=days)
+
+
+def daily_reconciliation_series_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+    with db_lock:
+        return sale_plans_repo.daily_reconciliation_series(DB_PATH, farm_ids=farm_ids, days=days)
+
+
+def pig_type_composition_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+    with db_lock:
+        return sale_plans_repo.pig_type_composition(DB_PATH, farm_ids=farm_ids, days=days)
+
+
+def list_needs_reconciliation_locked(farm_ids: list[int] | None = None, limit: int = 5) -> dict:
+    with db_lock:
+        return sale_plans_repo.list_needs_reconciliation(DB_PATH, farm_ids=farm_ids, limit=limit)
 
 
 def update_user_role_locked(user_id: int, role: str) -> None:
     with db_lock:
         users_repo.update_user_role(user_id, role, DB_PATH)
+
+
+def delete_user_locked(user_id: int) -> None:
+    with db_lock:
+        users_repo.delete_user(user_id, DB_PATH)
 
 
 def list_farm_ids_for_user_locked(user_id: int) -> list[int]:
@@ -317,11 +368,189 @@ def export_plans_excel_locked(dest) -> None:
         export_service.export_sale_plans_to_excel(DB_PATH, dest)
 
 
-def export_allocations_excel_locked(dest) -> None:
+def export_orders_excel_locked(dest) -> None:
     with db_lock:
-        export_service.export_sale_allocations_to_excel(DB_PATH, dest)
+        export_service.export_sale_orders_to_excel(DB_PATH, dest)
 
 
-def export_allocation_quotation_excel_locked(dest, allocation_ids: list[int]) -> None:
+def export_order_quotation_excel_locked(dest, order_ids: list[int]) -> None:
     with db_lock:
-        export_service.export_allocation_quotation_to_excel(DB_PATH, dest, allocation_ids)
+        export_service.export_order_quotation_to_excel(DB_PATH, dest, order_ids)
+
+
+def lock_order_locked(order_id: int, ip: str | None, username: str | None) -> bool:
+    with db_lock:
+        return weighing_repo.lock_record("sale_orders", order_id, DB_PATH, ip=ip, username=username)
+
+
+# ---------------------------------------------------------------------------
+# Cần xử lý (Operational Dashboard / Exception Center)
+# ---------------------------------------------------------------------------
+
+
+def list_pending_review_locked(farm_ids: list[int] | None = None, limit: int = 5) -> dict:
+    with db_lock:
+        return sale_plans_repo.list_pending_review(DB_PATH, farm_ids=farm_ids, limit=limit)
+
+
+def list_awaiting_receipt_locked(farm_ids: list[int] | None = None, limit: int = 5) -> dict:
+    with db_lock:
+        return sale_plans_repo.list_awaiting_receipt(DB_PATH, farm_ids=farm_ids, limit=limit)
+
+
+def list_awaiting_sale_details_locked(limit: int = 5) -> dict:
+    with db_lock:
+        return sale_orders_repo.list_awaiting_sale_details(DB_PATH, limit=limit)
+
+
+def list_awaiting_revenue_locked(limit: int = 5) -> dict:
+    with db_lock:
+        return sale_orders_repo.list_awaiting_revenue(DB_PATH, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Heo loại/hủy (incident_reports) + ảnh bằng chứng (media_proof)
+# ---------------------------------------------------------------------------
+
+
+def get_allocation_for_incident_locked(allocation_id: int) -> dict | None:
+    with db_lock:
+        return incident_repo.get_allocation_for_incident(allocation_id, DB_PATH)
+
+
+def create_incident_locked(
+    allocation_id: int, kind: str, quantity: int, description: str, ip: str | None, username: str | None
+) -> dict:
+    with db_lock:
+        return incident_repo.create_incident(
+            allocation_id, kind, quantity, description, DB_PATH, reported_by=username, ip=ip
+        )
+
+
+def get_incident_locked(incident_id: int) -> dict | None:
+    with db_lock:
+        return incident_repo.get_incident(incident_id, DB_PATH)
+
+
+def list_incidents_for_order_locked(order_id: int) -> list[dict]:
+    with db_lock:
+        return incident_repo.list_incidents_for_order(order_id, DB_PATH)
+
+
+def delete_incident_locked(incident_id: int) -> bool:
+    with db_lock:
+        return incident_repo.delete_incident(incident_id, DB_PATH)
+
+
+def save_media_upload_locked(
+    file_bytes: bytes,
+    entity_type: str,
+    entity_id,
+    kind: str,
+    uploaded_by: str | None,
+    uploaded_ip: str | None,
+    original_filename: str | None,
+    mime_type: str | None,
+) -> dict:
+    with db_lock:
+        return media_repo.save_upload(
+            file_bytes,
+            entity_type,
+            entity_id,
+            kind,
+            MEDIA_ROOT,
+            DB_PATH,
+            uploaded_by=uploaded_by,
+            uploaded_ip=uploaded_ip,
+            original_filename=original_filename,
+            mime_type=mime_type,
+        )
+
+
+def get_media_locked(media_id: int) -> dict | None:
+    with db_lock:
+        return media_repo.get_media(media_id, DB_PATH)
+
+
+def list_media_for_entity_locked(entity_type: str, entity_id) -> list[dict]:
+    with db_lock:
+        return media_repo.list_media_for_entity(entity_type, entity_id, DB_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Đối soát kế hoạch trại (sale_plan_reconciliations) + ảnh bằng chứng (media_proof)
+# ---------------------------------------------------------------------------
+
+
+def create_plan_reconciliation_locked(
+    sale_plan_id: int, kind: str, quantity: int, reason: str, ip: str | None, username: str | None
+) -> dict:
+    with db_lock:
+        return plan_reconciliation_repo.create_reconciliation(
+            sale_plan_id, kind, quantity, reason, DB_PATH, reported_by=username, ip=ip
+        )
+
+
+def get_reconciliation_locked(reconciliation_id: int) -> dict | None:
+    with db_lock:
+        return plan_reconciliation_repo.get_reconciliation(reconciliation_id, DB_PATH)
+
+
+def list_reconciliations_for_plan_locked(sale_plan_id: int) -> list[dict]:
+    with db_lock:
+        return plan_reconciliation_repo.list_reconciliations_for_plan(sale_plan_id, DB_PATH)
+
+
+def delete_reconciliation_locked(reconciliation_id: int) -> bool:
+    with db_lock:
+        return plan_reconciliation_repo.delete_reconciliation(reconciliation_id, DB_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Xuất giao thực tế (sale_deliveries) — loại heo/số lượng/kg/ngày xuất THẬT
+# ---------------------------------------------------------------------------
+
+
+def create_delivery_locked(allocation_id: int, delivery: dict, ip: str | None, username: str | None) -> dict:
+    with db_lock:
+        return sale_deliveries_repo.create_delivery(allocation_id, delivery, DB_PATH, ip, username)
+
+
+def get_delivery_locked(delivery_id: int) -> dict | None:
+    with db_lock:
+        return sale_deliveries_repo.get_delivery(delivery_id, DB_PATH)
+
+
+def list_deliveries_for_allocation_locked(allocation_id: int) -> list[dict]:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries_for_allocation(allocation_id, DB_PATH)
+
+
+def list_deliveries_for_order_locked(order_id: int) -> list[dict]:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries_for_order(order_id, DB_PATH)
+
+
+def list_deliveries_for_plan_locked(sale_plan_id: int) -> list[dict]:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries_for_plan(sale_plan_id, DB_PATH)
+
+
+def delete_delivery_locked(delivery_id: int) -> tuple[bool, str | None]:
+    with db_lock:
+        return sale_deliveries_repo.delete_delivery(delivery_id, DB_PATH)
+
+
+def sum_delivered_for_plan_locked(sale_plan_id: int) -> int:
+    with db_lock:
+        return sale_deliveries_repo.sum_delivered_for_plan(sale_plan_id, DB_PATH)
+
+
+def count_deliveries_for_pig_type_locked(pig_type_id: int) -> int:
+    with db_lock:
+        return sale_deliveries_repo.count_deliveries_for_pig_type(pig_type_id, DB_PATH)
+
+
+def lock_delivery_locked(delivery_id: int, ip: str | None, username: str | None) -> bool:
+    with db_lock:
+        return weighing_repo.lock_record("sale_deliveries", delivery_id, DB_PATH, ip, username)

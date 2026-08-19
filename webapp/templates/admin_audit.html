@@ -3,6 +3,23 @@
 {% block brand_title %}📋 Nhật ký hoạt động{% endblock %}
 {% block brand_sub %}{{ total }} hoạt động (đang xem trang {{ page }}/{{ total_pages }}){% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Nhật ký hoạt động</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">📋 Nhật ký hoạt động</h1>
+    <p class="page-header-desc">{{ total }} hoạt động (đang xem trang {{ page }}/{{ total_pages }})</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   <section class="card">
     <form method="get" class="plan-form">
@@ -48,45 +65,31 @@
   </section>
 
   <section class="card">
-    <div class="admin-table-wrap">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Thời gian</th>
-            <th>Tài khoản</th>
-            <th>Hành động</th>
-            <th>Đối tượng</th>
-            <th>Thay đổi</th>
-            <th>IP</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in entries %}
-          <tr>
-            <td>{{ e.at }}</td>
-            <td>{{ e.username or '—' }}</td>
-            <td>{{ action_label(e.action) }}</td>
-            <td>{% if e.entity_type %}{{ e.entity_type }}#{{ e.entity_id }}{% else %}—{% endif %}</td>
-            <td class="detail-cell">
-              {% if e.old_value and e.new_value %}
-                {% for k, v in e.new_value.items() %}
-                  {% if e.old_value.get(k) != v %}<div>{{ k }}: <s>{{ e.old_value.get(k) }}</s> → <strong>{{ v }}</strong></div>{% endif %}
-                {% endfor %}
-              {% elif e.new_value %}
-                {% for k, v in e.new_value.items() %}<div>{{ k }} = {{ v }}</div>{% endfor %}
-              {% elif e.old_value %}
-                {% for k, v in e.old_value.items() %}<div>{{ k }} = {{ v }} <em>(đã xóa)</em></div>{% endfor %}
-              {% endif %}
-              {{ e.detail or '' }}
-            </td>
-            <td>{{ e.ip or '' }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="6">Không có hoạt động nào khớp bộ lọc.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    {% if entries %}
+    <div class="timeline">
+      {% for e in entries %}
+      <div class="timeline-item{{ ' is-danger' if is_danger_action(e.action) else '' }}">
+        <div class="timeline-item-time">{{ e.at }}{% if e.username %} · {{ e.username }}{% endif %}</div>
+        <div class="timeline-item-title">{{ action_icon(e.action) }} {{ action_label(e.action) }}{% if e.entity_type %} — {{ e.entity_type }}#{{ e.entity_id }}{% endif %}</div>
+        <div class="timeline-item-detail">
+          {% if e.old_value and e.new_value %}
+            {% for k, v in e.new_value.items() %}
+              {% if e.old_value.get(k) != v %}<div>{{ k }}: <s>{{ e.old_value.get(k) }}</s> → <strong>{{ v }}</strong></div>{% endif %}
+            {% endfor %}
+          {% elif e.new_value %}
+            {% for k, v in e.new_value.items() %}<div>{{ k }} = {{ v }}</div>{% endfor %}
+          {% elif e.old_value %}
+            {% for k, v in e.old_value.items() %}<div>{{ k }} = {{ v }} <em>(đã xóa)</em></div>{% endfor %}
+          {% endif %}
+          {{ e.detail or '' }}
+          {% if e.ip %}<span class="muted"> · IP {{ e.ip }}</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
     </div>
+    {% else %}
+    <p class="msg">Không có hoạt động nào khớp bộ lọc.</p>
+    {% endif %}
 
     {% if total_pages > 1 %}
     <div class="control-row buttons" style="margin-top: 1rem;">

@@ -3,7 +3,7 @@ heo bán) + nhật ký hoạt động (chỉ admin)."""
 import json
 import re
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, session
 
 from core import audit_actions
 from core import permissions as perm
@@ -11,6 +11,7 @@ from core.repositories import audit_repo, users_repo
 from data_access import (
     assign_user_farms_locked,
     count_plans_for_farm_locked,
+    count_deliveries_for_pig_type_locked,
     count_plans_for_pig_type_locked,
     count_plans_for_zone_locked,
     count_users_with_role_locked,
@@ -21,6 +22,7 @@ from data_access import (
     delete_farm_locked,
     delete_pig_type_locked,
     delete_role_locked,
+    delete_user_locked,
     delete_zone_locked,
     get_farm_locked,
     get_pig_type_locked,
@@ -168,6 +170,31 @@ def api_admin_users_reset_password(user_id: int):
     return jsonify({"ok": True})
 
 
+@admin_bp.route("/api/admin/users/<int:user_id>", methods=["DELETE"])
+@permission_required(perm.ADMIN_USERS_MANAGE)
+def api_admin_users_delete(user_id: int):
+    users = users_repo.list_users(DB_PATH)
+    old_user = next((u for u in users if u["id"] == user_id), None)
+    if old_user is None:
+        return jsonify({"error": "Không tìm thấy tài khoản."}), 404
+    if user_id == session["user"]["id"]:
+        return jsonify({"error": "Không thể xoá chính tài khoản đang đăng nhập."}), 400
+    if old_user["role"] == "admin" and old_user["is_active"]:
+        other_active_admins = [
+            u for u in users if u["id"] != user_id and u["role"] == "admin" and u["is_active"]
+        ]
+        if not other_active_admins:
+            return jsonify({"error": "Không thể xoá: đây là tài khoản admin đang hoạt động cuối cùng."}), 400
+    delete_user_locked(user_id)
+    log_audit(
+        audit_actions.USER_DELETE,
+        entity_type="user",
+        entity_id=user_id,
+        old_value={"username": old_user["username"], "display_name": old_user["display_name"], "role": old_user["role"]},
+    )
+    return jsonify(users_repo.list_users(DB_PATH))
+
+
 @admin_bp.route("/admin/audit", methods=["GET"])
 @permission_required(perm.ADMIN_AUDIT_VIEW)
 def admin_audit_page():
@@ -201,6 +228,8 @@ def admin_audit_page():
         total=total,
         total_pages=max(1, -(-total // page_size)),
         action_label=audit_actions.label,
+        action_icon=audit_actions.icon_for,
+        is_danger_action=audit_actions.is_danger,
         all_actions=sorted(audit_actions.LABELS.items(), key=lambda kv: kv[1]),
     )
 
@@ -434,8 +463,15 @@ def api_admin_pig_types_delete(pig_type_id: int):
     old_pig_type = get_pig_type_locked(pig_type_id)
     if old_pig_type is None:
         return jsonify({"error": "Không tìm thấy loại heo."}), 404
-    if count_plans_for_pig_type_locked(pig_type_id) > 0:
-        return jsonify({"error": "Không thể xóa: loại heo đang được dùng trong kế hoạch xuất bán."}), 400
+    # Phải kiểm CẢ sale_deliveries: cả tính năng xuất giao thực tế sinh ra để
+    # ghi nhận loại heo giao KHÁC kế hoạch, nên 1 loại chỉ xuất hiện ở delivery
+    # sẽ có count_plans_for_pig_type = 0 nhưng vẫn đang được dùng thật. Xoá nó
+    # sẽ mất luôn câu trả lời "lệch sang loại gì" (PRAGMA foreign_keys không
+    # bật nên DB không tự chặn).
+    if count_plans_for_pig_type_locked(pig_type_id) > 0 or count_deliveries_for_pig_type_locked(pig_type_id) > 0:
+        return jsonify(
+            {"error": "Không thể xóa: loại heo đang được dùng trong kế hoạch xuất bán hoặc bản ghi xuất giao."}
+        ), 400
     delete_pig_type_locked(pig_type_id)
     log_audit(
         audit_actions.PIG_TYPE_DELETE,

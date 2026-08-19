@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Báo cáo{% endblock %}
+{% block brand_title %}📊 Báo cáo{% endblock %}
+{% block brand_sub %}Xuất báo cáo Excel{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Báo cáo</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">📊 Báo cáo</h1>
+    <p class="page-header-desc">Toàn bộ báo cáo Excel có thể xuất, gộp về 1 chỗ cho dễ tìm</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="section-head">
+      <h2>🗓️ Kế hoạch trại</h2>
+    </div>
+    <p class="dashboard-intro">Toàn bộ kế hoạch trại (nguồn cung, BM01) — trại, khu/chuồng/lô, loại heo, số lượng dự kiến/thực nhận/đã phân bổ/còn lại, trạng thái duyệt, người tạo/duyệt.</p>
+    <a class="btn btn-primary" href="{{ url_for('plans.export_plans_excel') }}">⬇️ Xuất Excel</a>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>🧾 Kế hoạch bán</h2>
+    </div>
+    <p class="dashboard-intro">Toàn bộ đơn hàng (BM02) — 1 dòng Excel = 1 dòng hàng, kèm khách hàng, giá chào/thực tế, số lượng, thanh toán, doanh thu, hoá đơn.</p>
+    <a class="btn btn-primary" href="{{ url_for('plans.export_orders_excel') }}">⬇️ Xuất Excel</a>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>📈 Giá heo hơi</h2>
+    </div>
+    <p class="dashboard-intro">Toàn bộ dữ liệu giá heo hơi tham khảo đã thu thập — nguồn, miền, địa phương, giá, biến động theo ngày.</p>
+    <a class="btn btn-primary" href="{{ url_for('prices.export_excel') }}">⬇️ Xuất Excel</a>
+  </section>
+{% endblock %}

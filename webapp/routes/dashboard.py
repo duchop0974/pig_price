@@ -1,16 +1,25 @@
 """Blueprint trang chủ (Tổng quan) + trang Quy trình xuất bán (sơ đồ)."""
-from flask import Blueprint, render_template, session
+from flask import Blueprint, jsonify, render_template, request, session, url_for
 
 from core import permissions as perm
-from data_access import dashboard_stats_locked
-from routes.auth import allowed_farm_ids
+from data_access import (
+    dashboard_summary_locked,
+    daily_reconciliation_series_locked,
+    list_awaiting_receipt_locked,
+    list_awaiting_revenue_locked,
+    list_awaiting_sale_details_locked,
+    list_needs_reconciliation_locked,
+    list_pending_review_locked,
+    pig_type_composition_locked,
+)
+from routes.auth import allowed_farm_ids, current_user_can
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
 # Các bước của quy trình xuất bán, theo đúng thứ tự nghiệp vụ thực tế —
 # mỗi bước gắn với 1 permission key (gate hiển thị) và 1 endpoint trang đích.
-# Bước 2-5 đều nằm trên cùng trang /ke-hoach (chưa có deep-link riêng theo
-# trạng thái trong plans.html), chỉ khác nhau về mặt trực quan trên sơ đồ.
+# Bước 1-3 nằm trên /ke-hoach (kế hoạch trại), bước 4-7 nằm trên /ke-hoach-ban
+# (kế hoạch bán) — 2 trang riêng từ GĐ6.
 PROCESS_STEPS = [
     {
         "title": "1. Tạo kế hoạch trại",
@@ -38,28 +47,28 @@ PROCESS_STEPS = [
         "desc": "Phòng bán hàng nhặt số lượng/loại heo từ kế hoạch trại đã duyệt, gán giá chào bán.",
         "icon": "🧾",
         "permission": perm.PLAN_ALLOCATION_CREATE,
-        "endpoint": "plans.plans_page",
+        "endpoint": "plans.allocations_page",
     },
     {
         "title": "5. Chốt thông tin bán hàng",
         "desc": "Gán khách hàng, giá thoả thuận, thời gian & hình thức giao cho kế hoạch bán.",
         "icon": "🤝",
         "permission": perm.PLAN_SALE_DETAILS,
-        "endpoint": "plans.plans_page",
+        "endpoint": "plans.allocations_page",
     },
     {
         "title": "6. Đánh dấu Đã bán",
         "desc": "Ghi nhận giá và số lượng bán thực tế khi hoàn tất xuất bán.",
         "icon": "🚚",
         "permission": perm.PLAN_ALLOCATION_MANAGE,
-        "endpoint": "plans.plans_page",
+        "endpoint": "plans.allocations_page",
     },
     {
         "title": "7. Ghi nhận doanh thu & hoá đơn",
         "desc": "Kế toán ghi nhận số tiền đã thu, chứng từ cân, số hoá đơn.",
         "icon": "💰",
         "permission": perm.PLAN_REVENUE_DETAILS,
-        "endpoint": "plans.plans_page",
+        "endpoint": "plans.allocations_page",
     },
     {
         "title": "8. Quản lý khách hàng",
@@ -71,14 +80,133 @@ PROCESS_STEPS = [
 ]
 
 
+def _build_exceptions(farm_ids: list[int] | None) -> list[dict]:
+    """Khối "Cần xử lý" ở Tổng quan — mỗi nhóm chỉ hiện khi user có đúng
+    quyền xử lý bước đó (giống cách PROCESS_STEPS gate hiển thị), và chỉ
+    khi thực sự có việc (total > 0). ?highlight=<id> gắn vào link từng item
+    để trang đích tự scroll+tô sáng đúng card (xem plan.js/allocation.js)."""
+    exceptions = []
+
+    if current_user_can(perm.PLAN_REVIEW):
+        r = list_pending_review_locked(farm_ids=farm_ids)
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "⏳",
+                    "text": f"{r['total']} kế hoạch trại chờ duyệt",
+                    "entries": [
+                        {
+                            "label": f"{p['plan_code']} · {p['farm']} · {p['quantity']} con",
+                            "url": url_for("plans.plans_page", highlight=p["id"]),
+                        }
+                        for p in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.plans_page"),
+                }
+            )
+
+    if current_user_can(perm.PLAN_RECEIVE):
+        r = list_awaiting_receipt_locked(farm_ids=farm_ids)
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "📦",
+                    "text": f"{r['total']} kế hoạch quá ngày dự kiến chưa ghi nhận xuất chuồng",
+                    "entries": [
+                        {
+                            "label": f"{p['plan_code']} · {p['farm']} · {p['quantity']} con",
+                            "url": url_for("plans.plans_page", highlight=p["id"]),
+                        }
+                        for p in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.plans_page"),
+                }
+            )
+
+    if current_user_can(perm.PLAN_SALE_DETAILS):
+        r = list_awaiting_sale_details_locked()
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "🤝",
+                    "text": f"{r['total']} đơn hàng chưa chốt bán hàng (chưa gán khách hàng)",
+                    "entries": [
+                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        for o in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.allocations_page"),
+                }
+            )
+
+    if current_user_can(perm.PLAN_REVENUE_DETAILS):
+        r = list_awaiting_revenue_locked()
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "💰",
+                    "text": f"{r['total']} đơn đã bán chưa ghi nhận doanh thu",
+                    "entries": [
+                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        for o in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.allocations_page"),
+                }
+            )
+
+    # Kế hoạch còn chênh lệch chưa xử lý VÀ đã quá ngày dự kiến — gate theo
+    # đúng quyền hành động (plans.reconcile_create), khớp cách 4 loại trên
+    # gate theo quyền xử lý bước đó, không phải quyền xem.
+    if current_user_can(perm.PLAN_RECONCILE_CREATE):
+        r = list_needs_reconciliation_locked(farm_ids=farm_ids)
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "⚖️",
+                    "text": f"{r['total']} kế hoạch cần đối soát (còn chênh lệch, đã quá ngày dự kiến)",
+                    "entries": [
+                        {
+                            "label": f"{p['plan_code']} · {p['farm']} · còn {p['remaining_to_reconcile']} con",
+                            "url": url_for("plans.plans_page", highlight=p["id"]),
+                        }
+                        for p in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.plans_page"),
+                }
+            )
+
+    return exceptions
+
+
 @dashboard_bp.route("/")
 def index():
     farm_ids = allowed_farm_ids(session["user"])
-    stats = dashboard_stats_locked(farm_ids=farm_ids)
-    # Định dạng kiểu Việt Nam (dấu chấm ngăn cách hàng nghìn), khớp fmtPrice()
-    # trong common.js dùng toLocaleString("vi-VN") ở các trang khác.
-    stats["revenue_this_month_fmt"] = f"{stats['revenue_this_month']:,}".replace(",", ".")
-    return render_template("dashboard.html", stats=stats)
+    exceptions = _build_exceptions(farm_ids)
+    return render_template("dashboard.html", exceptions=exceptions)
+
+
+@dashboard_bp.route("/api/dashboard/summary", methods=["GET"])
+def api_dashboard_summary():
+    """5 KPI + biểu đồ xu hướng + biểu đồ cơ cấu cho trang Tổng quan — 1
+    request duy nhất, không gate permission riêng (trang Tổng quan hiện
+    không gate), chỉ lọc farm_ids như route "/" đang làm."""
+    try:
+        days = int(request.args.get("days", 30))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(1, min(days, 365))
+    farm_ids = allowed_farm_ids(session["user"])
+    return jsonify(
+        {
+            "kpi": dashboard_summary_locked(farm_ids=farm_ids, days=days),
+            "daily": daily_reconciliation_series_locked(farm_ids=farm_ids, days=days),
+            "composition": pig_type_composition_locked(farm_ids=farm_ids, days=days),
+        }
+    )
 
 
 @dashboard_bp.route("/quy-trinh")
