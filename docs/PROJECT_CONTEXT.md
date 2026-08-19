@@ -1156,6 +1156,82 @@ dữ liệu thật của kế hoạch 16 (xoá sau khi xong): cả modal chi ti�
 modal "Xử lý chênh lệch" đều hiện đúng "Tiếp tục bán: 300 con (chưa
 đóng chênh lệch)"/"Đã ghi nhận trước".
 
+### 7. Enterprise Refactor — Service Layer (STEP 1/STEP 4, 2026-08-19)
+
+Thực hiện theo `PIG_PRICE_ENTERPRISE_REFACTOR_CONTEXT.md` (lộ trình 12
+STEP, không rewrite toàn bộ, không đổi framework, không PostgreSQL, không
+microservices). Đã hoàn tất STEP 1 (Database Hardening) + STEP 4
+(Transaction Standardization, dưới dạng Service Layer) cho **toàn bộ**
+domain ghi dữ liệu của app — kể cả mảng quản trị. Branch
+`refactor/enterprise-foundation`.
+
+**Kiến trúc mới — Route → Service → Repository**:
+- **Route** (`webapp/routes/*.py`): chỉ còn lo HTTP — đọc `request`/
+  `session`, validate input, gọi service, `jsonify`/`redirect`. Không tự
+  mở transaction, không tự gọi `log_audit()` cho các hành động đã có
+  service (trừ 1 ngoại lệ có ghi chú trong code:
+  `plans.py` tạo đối soát kèm ảnh — audit cần biết số ảnh, chỉ biết được
+  *sau* khi service đã tạo bản ghi và upload file xong, nên tách audit
+  ra ngoài transaction một cách có chủ đích).
+- **Service** (`core/services/*_service.py`, mới — trước đây không có
+  tầng này): mỗi hành động ghi là 1 hàm gộp đúng **1 lần ghi repo + 1 lần
+  `audit_repo.log_action()` vào chung 1 transaction** qua
+  `core/db.py::run_in_transaction(db_path, fn)` — đóng lỗ hổng cũ "ghi
+  xong nhưng audit lỗi thì mất vết" (route trước đây gọi
+  `xxx_locked()` rồi `log_audit()` rời, không atomic). Validate nghiệp vụ
+  (trùng mã, quan hệ tham chiếu, tự xoá chính mình, role hệ thống...) vẫn
+  ở route layer — service chỉ lo transaction + audit, chưa gánh validate.
+- **Repository** (`core/repositories/*_repo.py`): mỗi hàm ghi được thêm
+  tham số `conn: sqlite3.Connection | None = None` tuỳ chọn, cùng khuôn
+  `own_connection = conn is None` — nếu gọi không kèm `conn` thì tự mở/
+  đóng/commit connection riêng như trước (100% tương thích ngược,
+  `data_access.py` `*_locked()` gọi thẳng không cần đổi gì); nếu được
+  truyền `conn` (từ service) thì dùng chung connection đó, không tự
+  commit/close, để nhiều lệnh ghi + audit gộp chung 1 transaction thật.
+
+**`core/db.py`**: thêm `db_lock` (chuyển từ `webapp/extensions.py` sang,
+1 `threading.Lock()` toàn app), `transaction(conn)` (contextmanager
+`BEGIN`/commit/rollback, no-op nếu `conn.in_transaction` đã `True`), và
+`run_in_transaction(db_path, fn)` — mở 1 connection dưới `db_lock`, chạy
+`fn(conn)` trong 1 `transaction()`, đóng connection; đây là hàm dùng
+chung của **mọi** service (`_write = run_in_transaction` ở đầu mỗi file
+service). PRAGMA `foreign_keys` cũng đã bật (STEP 1).
+
+**Domain đã migrate xong** (mỗi domain đều có integration test riêng ở
+gốc repo, `test_api_<domain>_tmp.py`, giữ lại làm nền cho `tests/` thật
+sau này — STEP 6):
+- `plan_service.py` — `sale_plans` + `sale_plan_reconciliations` (tạo/
+  duyệt/từ chối/đổi trạng thái/ghi nhận thực nhận/sửa/xoá kế hoạch trại,
+  tạo/xoá đối soát).
+- `order_service.py` — `sale_allocations` (kế hoạch bán/đơn hàng): tạo
+  đơn, thêm/sửa/xoá dòng, đổi trạng thái, khoá, hoàn tất, cập nhật thông
+  tin bán hàng/doanh thu.
+- `delivery_service.py` — `sale_deliveries` (tạo/xoá bản ghi giao hàng).
+- `customer_service.py` — `customers` (tạo/sửa/bật-tắt/xoá).
+- `authorization_service.py` — tách phần **đọc** quyền hạn (không phải
+  ghi, không dùng `run_in_transaction`) ra khỏi `webapp/routes/auth.py`
+  thành hàm thuần (`effective_permissions`/`has_permission`/
+  `has_any_permission`/`allowed_farm_ids`, nhận `user: dict | None` thay
+  vì đọc thẳng Flask `session`) — `auth.py` giữ nguyên các hàm/decorator
+  cũ làm wrapper mỏng gọi vào đây, không đổi API cho 6 file đang import.
+- `user_service.py` — quản trị tài khoản: tạo, đổi vai trò, gán trại,
+  bật/tắt, đặt lại mật khẩu, xoá.
+- `farm_service.py` — danh mục Trang trại/Khu: tạo/sửa/xoá farm, tạo/
+  sửa/xoá zone.
+- `pig_type_service.py` — danh mục Loại heo bán: tạo/sửa/bật-tắt/xoá.
+- `role_service.py` — Vai trò & phân quyền tuỳ biến: tạo/xoá role, cập
+  nhật tập quyền của role.
+
+**Lưu ý kỹ thuật khi viết test cho domain mới** (đã gặp 2 lần, tốn thời
+gian debug): (1) hàm insert-rồi-đọc-lại trong repo phải đọc lại qua
+**cùng** `conn` được truyền vào (không mở connection mới) — SQLite WAL
+không thấy được dữ liệu chưa commit từ 1 connection khác dùng chung
+transaction; (2) module nào tự `from extensions import DB_PATH` ở top
+level (import bởi `app_factory.py` cũng ở top level, không phải lazy
+trong `create_app()`) thì test phải patch `DB_PATH` riêng trên module đó
+(`routes.admin.DB_PATH = test_db`, không chỉ `extensions.DB_PATH`) — patch
+timing, không phải bug thật.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng
