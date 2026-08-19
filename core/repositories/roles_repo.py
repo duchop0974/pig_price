@@ -31,26 +31,34 @@ def get_role(role_key: str, db_path: Path) -> dict | None:
         conn.close()
 
 
-def create_role(key: str, name: str, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def create_role(key: str, name: str, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "INSERT INTO roles (key, name, is_system, created_at) VALUES (?, ?, 0, ?)",
             (key, name, datetime.now().isoformat(timespec="seconds")),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_role(role_key: str, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def delete_role(role_key: str, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM role_permissions WHERE role_key = ?", (role_key,))
         conn.execute("DELETE FROM roles WHERE key = ?", (role_key,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def count_users_with_role(role_key: str, db_path: Path) -> int:
@@ -72,19 +80,25 @@ def list_permissions_for_role(role_key: str, db_path: Path) -> list[str]:
         conn.close()
 
 
-def set_permissions_for_role(role_key: str, permission_keys: list[str], db_path: Path) -> None:
+def set_permissions_for_role(
+    role_key: str, permission_keys: list[str], db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
     """Ghi đè toàn bộ tập quyền của 1 role — xoá cũ rồi chèn lại danh sách
     mới, cùng UX "tick chọn lại rồi Lưu" như assign_user_farms."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM role_permissions WHERE role_key = ?", (role_key,))
         conn.executemany(
             "INSERT INTO role_permissions (role_key, permission_key) VALUES (?, ?)",
             [(role_key, key) for key in permission_keys],
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def effective_permissions(role_key: str, db_path: Path) -> set[str]:

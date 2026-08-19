@@ -8,15 +8,13 @@ from flask import Blueprint, jsonify, render_template, request, session
 from core import audit_actions
 from core import permissions as perm
 from core.repositories import audit_repo, users_repo
-from core.services import farm_service, pig_type_service, user_service
+from core.services import farm_service, pig_type_service, role_service, user_service
 from data_access import (
     count_plans_for_farm_locked,
     count_deliveries_for_pig_type_locked,
     count_plans_for_pig_type_locked,
     count_plans_for_zone_locked,
     count_users_with_role_locked,
-    create_role_locked,
-    delete_role_locked,
     get_farm_locked,
     get_pig_type_locked,
     get_role_locked,
@@ -27,9 +25,8 @@ from data_access import (
     list_pig_types_locked,
     list_roles_locked,
     list_zones_locked,
-    set_permissions_for_role_locked,
 )
-from extensions import DB_PATH, db_lock, log_audit
+from extensions import DB_PATH, db_lock
 from routes.auth import permission_required
 
 admin_bp = Blueprint("admin", __name__)
@@ -439,13 +436,7 @@ def api_admin_roles_create():
         return jsonify({"error": "Vui lòng nhập tên vai trò hợp lệ."}), 400
     if get_role_locked(key) is not None:
         return jsonify({"error": "Mã vai trò đã tồn tại."}), 400
-    create_role_locked(key, name)
-    log_audit(
-        audit_actions.ROLE_CREATE,
-        entity_type="role",
-        entity_id=key,
-        new_value={"key": key, "name": name},
-    )
+    role_service.create_role(key, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(_role_permissions_matrix()), 201
 
 
@@ -459,13 +450,7 @@ def api_admin_roles_delete(role_key: str):
         return jsonify({"error": "Không thể xóa vai trò hệ thống."}), 400
     if count_users_with_role_locked(role_key) > 0:
         return jsonify({"error": "Không thể xóa: đang có tài khoản dùng vai trò này."}), 400
-    delete_role_locked(role_key)
-    log_audit(
-        audit_actions.ROLE_DELETE,
-        entity_type="role",
-        entity_id=role_key,
-        old_value={"key": role_key, "name": role["name"]},
-    )
+    role_service.delete_role(role_key, role, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
     return jsonify(_role_permissions_matrix())
 
 
@@ -482,12 +467,7 @@ def api_admin_roles_update_permissions(role_key: str):
     if not isinstance(raw_keys, list) or any(k not in perm.ALL_PERMISSION_KEYS for k in raw_keys):
         return jsonify({"error": "Danh sách quyền không hợp lệ."}), 400
     old_keys = list_permissions_for_role_locked(role_key)
-    set_permissions_for_role_locked(role_key, raw_keys)
-    log_audit(
-        audit_actions.ROLE_UPDATE_PERMISSIONS,
-        entity_type="role",
-        entity_id=role_key,
-        old_value={"permission_keys": old_keys},
-        new_value={"permission_keys": raw_keys},
+    role_service.update_permissions(
+        role_key, raw_keys, old_keys, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify(_role_permissions_matrix())
