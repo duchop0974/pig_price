@@ -54,9 +54,12 @@ def create_reconciliation(
     db_path: Path,
     reported_by: str | None = None,
     ip: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> dict:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             """
@@ -66,11 +69,24 @@ def create_reconciliation(
             """,
             (sale_plan_id, kind, quantity, reason, reported_by, now, now, ip, reported_by),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         reconciliation_id = cur.lastrowid
+        # Đọc lại bằng CHÍNH conn vừa insert (không mở connection mới như
+        # get_reconciliation() làm) — nếu conn là transaction dùng chung
+        # (own_connection=False) và chưa commit, 1 connection khác sẽ KHÔNG
+        # thấy được dòng vừa insert (WAL chỉ cho đọc dữ liệu ĐÃ commit).
+        # Dùng dict(zip(...)) thay vì conn.row_factory=sqlite3.Row để không
+        # làm lệch row_factory của connection dùng chung cho các lệnh khác
+        # trong cùng transaction.
+        row = conn.execute(
+            "SELECT " + ", ".join(RECONCILIATION_VISIBLE_COLUMNS) + " FROM sale_plan_reconciliations WHERE id = ?",
+            (reconciliation_id,),
+        ).fetchone()
+        return dict(zip(RECONCILIATION_VISIBLE_COLUMNS, row)) if row else None
     finally:
-        conn.close()
-    return get_reconciliation(reconciliation_id, db_path)
+        if own_connection:
+            conn.close()
 
 
 def get_reconciliation(reconciliation_id: int, db_path: Path) -> dict | None:
@@ -100,13 +116,19 @@ def list_reconciliations_for_plan(sale_plan_id: int, db_path: Path) -> list[dict
         conn.close()
 
 
-def delete_reconciliation(reconciliation_id: int, db_path: Path) -> bool:
+def delete_reconciliation(
+    reconciliation_id: int, db_path: Path, conn: sqlite3.Connection | None = None
+) -> bool:
     """Xoá bản ghi đối soát — KHÔNG xoá ảnh media_proof/file trên đĩa đã gắn
     với nó (giữ evidence trail dù bản ghi chính bị xoá), khớp delete_incident."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute("DELETE FROM sale_plan_reconciliations WHERE id = ?", (reconciliation_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()

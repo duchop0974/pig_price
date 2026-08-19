@@ -508,8 +508,11 @@ def update_sale_plan_status(
     db_path: Path,
     ip: str | None = None,
     username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -519,17 +522,27 @@ def update_sale_plan_status(
             """,
             (status, datetime.now().isoformat(timespec="seconds"), ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def approve_sale_plan(plan_id: int, db_path: Path, ip: str | None = None, username: str | None = None) -> None:
+def approve_sale_plan(
+    plan_id: int,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
     """Duyệt kế hoạch đang chờ. Điều kiện status='pending_approval' trong
     WHERE là lớp bảo vệ thứ 2 (ngoài check ở route) chống duyệt trùng/duyệt
     sai trạng thái."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -540,16 +553,25 @@ def approve_sale_plan(plan_id: int, db_path: Path, ip: str | None = None, userna
             """,
             (username, now, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def reject_sale_plan(
-    plan_id: int, reason: str, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    reason: str,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -560,19 +582,28 @@ def reject_sale_plan(
             """,
             (username, now, reason, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_plan_received_quantity(
-    plan_id: int, received_quantity: int, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    received_quantity: int,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     """Trại tự ghi nhận số lượng thực tế đã xuất chuồng/bàn giao ra nhà chờ
     bán (BM01/QT001 bước B6). Ghi đè giá trị (không cộng dồn) — mỗi lần trại
     xuất chuồng thêm thì tự nhập lại tổng số mới."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -583,13 +614,20 @@ def update_plan_received_quantity(
             """,
             (received_quantity, now, username, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_sale_plan_edit(
-    plan_id: int, plan: dict, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    plan: dict,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Sửa lại nội dung kế hoạch trại (trường hợp nhập nhầm). Đây là quyền
     admin-only-by-default (perm.PLAN_EDIT, xem route) nên KHÔNG còn ràng buộc
@@ -607,7 +645,9 @@ def update_sale_plan_edit(
     chặn từ đầu bằng status/permission vì đây là 1 ràng buộc dữ liệu cụ thể,
     không phải quy tắc phân quyền."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         current = conn.execute("SELECT quantity FROM sale_plans WHERE id = ?", (plan_id,)).fetchone()
         if current is not None and plan["quantity"] != current[0]:
@@ -651,28 +691,34 @@ def update_sale_plan_edit(
                 plan_id,
             ),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_sale_plan(plan_id: int, db_path: Path) -> bool:
+def delete_sale_plan(plan_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> bool:
     """Xoá vĩnh viễn 1 kế hoạch trại — chặn nếu còn BẤT KỲ kế hoạch bán nào
     (dòng hàng) từng "nhặt" từ đó, kể cả đã huỷ/vô hiệu hoá (giữ lịch sử đối
     soát toàn vẹn). Không cascade tự động — admin phải tự xử lý/xoá các dòng
     hàng liên quan trước nếu thật sự cần xoá."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             "DELETE FROM sale_plans WHERE id = ? AND NOT EXISTS "
             "(SELECT 1 FROM sale_allocations WHERE sale_plan_id = sale_plans.id)",
             (plan_id,),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def count_plans_for_farm(farm_id: int, db_path: Path) -> int:

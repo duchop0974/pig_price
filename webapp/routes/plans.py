@@ -12,15 +12,11 @@ from core.scrapers.utils import normalize_province
 from core.services import plan_service
 from data_access import (
     add_order_line_locked,
-    approve_plan_locked,
     count_orders_for_customer_locked,
     create_customer_locked,
     create_order_locked,
-    create_plan_reconciliation_locked,
     delete_customer_locked,
     delete_order_locked,
-    delete_plan_locked,
-    delete_reconciliation_locked,
     export_order_quotation_excel_locked,
     export_orders_excel_locked,
     export_plans_excel_locked,
@@ -39,7 +35,6 @@ from data_access import (
     list_zones_locked,
     load_df,
     mark_order_done_locked,
-    reject_plan_locked,
     remove_order_line_locked,
     save_media_upload_locked,
     set_customer_active_locked,
@@ -48,9 +43,6 @@ from data_access import (
     update_order_revenue_details_locked,
     update_order_sale_details_locked,
     update_order_status_locked,
-    update_plan_received_quantity_locked,
-    update_plan_status_locked,
-    update_sale_plan_edit_locked,
 )
 from extensions import DB_PATH, log_audit
 from routes.auth import allowed_farm_ids, current_user_permissions, permission_required
@@ -334,14 +326,7 @@ def api_plans_approve(plan_id: int):
         return jsonify({"error": "Kế hoạch không ở trạng thái chờ duyệt."}), 400
 
     username = session["user"]["username"]
-    approve_plan_locked(plan_id, request.remote_addr, username)
-    log_audit(
-        audit_actions.PLAN_APPROVE,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={"status": "pending_approval"},
-        new_value={"status": "approved", "approved_by": username},
-    )
+    plan_service.approve_plan(plan_id, DB_PATH, ip=request.remote_addr, username=username)
     return jsonify({"ok": True})
 
 
@@ -359,14 +344,7 @@ def api_plans_reject(plan_id: int):
         return jsonify({"error": "Kế hoạch không ở trạng thái chờ duyệt."}), 400
 
     username = session["user"]["username"]
-    reject_plan_locked(plan_id, reason, request.remote_addr, username)
-    log_audit(
-        audit_actions.PLAN_REJECT,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={"status": "pending_approval"},
-        new_value={"status": "rejected", "rejected_by": username, "rejected_reason": reason},
-    )
+    plan_service.reject_plan(plan_id, reason, DB_PATH, ip=request.remote_addr, username=username)
     return jsonify({"ok": True})
 
 
@@ -386,13 +364,8 @@ def api_plans_update(plan_id: int):
         return jsonify({"error": "Chỉ dùng chức năng Duyệt để chuyển kế hoạch từ Chờ duyệt sang Đã duyệt."}), 400
 
     username = session["user"]["username"]
-    update_plan_status_locked(plan_id, status, request.remote_addr, username)
-    log_audit(
-        audit_actions.PLAN_UPDATE_STATUS,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={"status": old_plan["status"]},
-        new_value={"status": status},
+    plan_service.update_plan_status(
+        plan_id, status, old_plan["status"], DB_PATH, ip=request.remote_addr, username=username
     )
     return jsonify({"ok": True})
 
@@ -418,13 +391,13 @@ def api_plans_received(plan_id: int):
         return jsonify({"error": "Số lượng thực nhận không hợp lệ."}), 400
 
     username = session["user"]["username"]
-    update_plan_received_quantity_locked(plan_id, received_quantity, request.remote_addr, username)
-    log_audit(
-        audit_actions.PLAN_UPDATE_RECEIVED,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={"received_quantity": old_plan["received_quantity"]},
-        new_value={"received_quantity": received_quantity},
+    plan_service.record_received(
+        plan_id,
+        received_quantity,
+        old_plan["received_quantity"],
+        DB_PATH,
+        ip=request.remote_addr,
+        username=username,
     )
     return jsonify({"ok": True})
 
@@ -485,7 +458,7 @@ def api_plans_edit(plan_id: int):
 
     username = session["user"]["username"]
     try:
-        updated = update_sale_plan_edit_locked(
+        updated = plan_service.edit_plan(
             plan_id,
             {
                 "planned_date": planned_date,
@@ -498,31 +471,15 @@ def api_plans_edit(plan_id: int):
                 "expected_avg_weight_kg": expected_avg_weight_kg,
                 "note": note,
             },
-            request.remote_addr,
-            username,
+            old_plan,
+            DB_PATH,
+            ip=request.remote_addr,
+            username=username,
         )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     if not updated:
         return jsonify({"error": "Kế hoạch không còn tồn tại, vui lòng tải lại trang."}), 404
-    log_audit(
-        audit_actions.PLAN_UPDATE_EDIT,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={
-            "planned_date": old_plan["planned_date"],
-            "farm_id": old_plan["farm_id"],
-            "pig_type": old_plan["pig_type"],
-            "quantity": old_plan["quantity"],
-        },
-        new_value={
-            "planned_date": planned_date,
-            "farm_id": farm_id,
-            "zone_id": zone_id,
-            "pig_type_id": pig_type_id,
-            "quantity": quantity,
-        },
-    )
     df = load_df()
     nat = national_price(df)
     plan = get_plan_locked(plan_id)
@@ -537,21 +494,11 @@ def api_plans_delete(plan_id: int):
     old_plan = get_plan_locked(plan_id)
     if old_plan is None:
         return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
-    deleted = delete_plan_locked(plan_id)
+    deleted = plan_service.delete_plan(
+        plan_id, old_plan, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+    )
     if not deleted:
         return jsonify({"error": "Không thể xoá: đã có kế hoạch bán tạo từ kế hoạch này."}), 400
-    log_audit(
-        audit_actions.PLAN_DELETE,
-        entity_type="sale_plan",
-        entity_id=plan_id,
-        old_value={
-            "plan_code": old_plan["plan_code"],
-            "planned_date": old_plan["planned_date"],
-            "farm_id": old_plan["farm_id"],
-            "quantity": old_plan["quantity"],
-            "status": old_plan["status"],
-        },
-    )
     return jsonify({"ok": True})
 
 
@@ -602,7 +549,7 @@ def api_plan_reconciliation_create(plan_id: int):
 
     username = session["user"]["username"]
     ip = request.remote_addr
-    reconciliation = create_plan_reconciliation_locked(plan_id, kind, quantity, reason, ip, username)
+    reconciliation = plan_service.create_reconciliation(plan_id, kind, quantity, reason, DB_PATH, ip=ip, username=username)
 
     media_list = []
     for photo in photos:
@@ -646,12 +593,8 @@ def api_plan_reconciliation_delete(reconciliation_id: int):
     reconciliation = get_reconciliation_locked(reconciliation_id)
     if reconciliation is None:
         return jsonify({"error": "Không tìm thấy bản ghi."}), 404
-    delete_reconciliation_locked(reconciliation_id)
-    log_audit(
-        audit_actions.PLAN_RECONCILE_DELETE,
-        entity_type="sale_plan",
-        entity_id=reconciliation["sale_plan_id"],
-        old_value=reconciliation,
+    plan_service.delete_reconciliation(
+        reconciliation_id, reconciliation, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify({"ok": True})
 
