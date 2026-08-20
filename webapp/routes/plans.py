@@ -18,6 +18,7 @@ from data_access import (
     get_customer_locked,
     get_order_locked,
     get_plan_locked,
+    get_plan_sale_breakdown_locked,
     get_reconciliation_locked,
     list_customers_locked,
     list_farms_locked,
@@ -453,6 +454,19 @@ def api_plan_reconciliation_delete(reconciliation_id: int):
         reconciliation_id, reconciliation, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
     )
     return jsonify({"ok": True})
+
+
+@plans_bp.route("/api/plans/<int:plan_id>/sale-breakdown", methods=["GET"])
+@permission_required(*_VIEW_PLAN_RECONCILE_PERMS)
+def api_plan_sale_breakdown(plan_id: int):
+    """Đối soát đa chiều (Phase 2): breakdown Khách hàng/Giá/Phiếu cân theo
+    kế hoạch — 1 kế hoạch có thể tách nhiều đơn/khách/giá nên trả về danh
+    sách (mỗi phần tử = 1 dòng hàng đã nhặt từ kế hoạch), không rút gọn về
+    1 field. Xem get_plan_sale_breakdown() (sale_plans_repo.py)."""
+    plan = get_plan_locked(plan_id)
+    if plan is None:
+        return jsonify({"error": "Không tìm thấy kế hoạch."}), 404
+    return jsonify(get_plan_sale_breakdown_locked(plan_id))
 
 
 @plans_bp.route("/doi-soat")

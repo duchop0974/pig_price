@@ -87,6 +87,39 @@ function dsExtraBadges(p) {
   return parts.join(" ");
 }
 
+// Đối soát đa chiều (Phase 2): Khách hàng/Giá/Phiếu cân không rút gọn về 1
+// cột được (1 kế hoạch có thể tách nhiều đơn/khách/giá) — hiện dạng bảng
+// nhỏ trong detailModal() (core/modal.js, đã load sẵn qua base.html, đúng
+// pattern plan.js/allocation.js đang dùng cho chi tiết đơn hàng).
+async function showSaleBreakdown(planId, planCode) {
+  const res = await fetch(`/api/plans/${planId}/sale-breakdown`);
+  if (!res.ok) {
+    showToast("Không tải được chi tiết bán hàng.", "error");
+    return;
+  }
+  const lines = await res.json();
+  const bodyHtml = !lines.length
+    ? `<p class="msg">Kế hoạch này chưa có dòng hàng nào.</p>`
+    : `<table class="admin-table">
+        <thead><tr><th>Đơn hàng</th><th>Khách hàng</th><th>Số lượng</th><th>Giá chốt</th><th>Giá thực tế</th><th>Phiếu cân</th></tr></thead>
+        <tbody>
+          ${lines
+            .map(
+              (l) => `<tr>
+                <td>${l.order_code}${renderBadge(l.order_status)}</td>
+                <td>${l.customer_name || "—"}</td>
+                <td>${fmtPrice(l.quantity)} con</td>
+                <td>${l.selling_price !== null ? fmtPrice(l.selling_price) + "đ" : "—"}</td>
+                <td>${l.actual_price !== null ? fmtPrice(l.actual_price) + "đ" : "—"}</td>
+                <td>${l.weighing_refs.length ? l.weighing_refs.join(", ") : "—"}</td>
+              </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>`;
+  detailModal({ title: `Chi tiết bán hàng — ${planCode}`, bodyHtml });
+}
+
 function planRowHtml(p) {
   const canAct = p.remaining_to_reconcile !== 0 && CAN_RECONCILE;
   const actionHtml = canAct
@@ -94,8 +127,9 @@ function planRowHtml(p) {
     : "";
   const remainingCls = p.remaining_to_reconcile < 0 ? "text-success" : p.remaining_to_reconcile > 0 ? "text-danger" : "";
   const noteHtml = [dsBreakdownText(p.reconciliation_breakdown), dsExtraBadges(p)].filter(Boolean).join(" ");
+  const planCodeSafe = (p.plan_code || "#" + p.id).replace(/'/g, "\\'");
   return `<tr>
-    <td data-label="Mã kế hoạch">${p.plan_code || "#" + p.id}</td>
+    <td data-label="Mã kế hoạch"><button type="button" class="btn btn-ghost btn-sm" onclick="showSaleBreakdown(${p.id}, '${planCodeSafe}')">${p.plan_code || "#" + p.id}</button></td>
     <td data-label="Trại">${p.farm}${p.zone ? " · " + p.zone : ""}</td>
     <td data-label="Loại heo">${p.pig_type_name || "—"}</td>
     <td data-label="Ngày dự kiến">${fmtIsoDate(p.planned_date)}</td>

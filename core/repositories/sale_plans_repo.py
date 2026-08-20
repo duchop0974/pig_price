@@ -980,3 +980,49 @@ def list_idle_supply(db_path: Path, farm_ids: list[int] | None = None, days: int
     ]
     matching.sort(key=lambda p: p["received_at"])
     return {"total": len(matching), "items": matching[:limit]}
+
+
+def get_plan_sale_breakdown(plan_id: int, db_path: Path) -> list[dict]:
+    """Đối soát đa chiều (brief nghiệp vụ): 3 chiều Khách hàng/Giá/Phiếu cân
+    KHÔNG rút gọn về 1 cột được vì 1 kế hoạch trại có thể tách nhiều đơn
+    hàng/khách hàng/giá khác nhau (đúng tình huống "1 kế hoạch có thể phân
+    bổ cho nhiều khách hàng" brief nêu) — trả về 1 danh sách, mỗi phần tử
+    là 1 dòng hàng (sale_allocations) đã "nhặt" từ kế hoạch này, kèm khách
+    hàng/giá chốt/giá thực tế của đơn chứa dòng đó + các phiếu cân
+    (weighing_ref) đã ghi nhận qua các lần xuất giao của dòng đó."""
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        alloc_rows = conn.execute(
+            """
+            SELECT sa.id AS allocation_id, sa.quantity, sa.selling_price, sa.actual_price,
+                   so.id AS order_id, so.order_code, so.status AS order_status,
+                   c.name AS customer_name
+            FROM sale_allocations sa
+            JOIN sale_orders so ON so.id = sa.order_id
+            LEFT JOIN customers c ON c.id = so.customer_id
+            WHERE sa.sale_plan_id = ?
+            ORDER BY so.created_at ASC, sa.id ASC
+            """,
+            (plan_id,),
+        ).fetchall()
+        if not alloc_rows:
+            return []
+        allocation_ids = [r["allocation_id"] for r in alloc_rows]
+        placeholders = ", ".join("?" * len(allocation_ids))
+        ticket_rows = conn.execute(
+            f"SELECT allocation_id, weighing_ref FROM sale_deliveries "
+            f"WHERE allocation_id IN ({placeholders}) AND weighing_ref IS NOT NULL AND weighing_ref != ''",
+            tuple(allocation_ids),
+        ).fetchall()
+        tickets_by_allocation: dict[int, list[str]] = {}
+        for t in ticket_rows:
+            tickets_by_allocation.setdefault(t["allocation_id"], []).append(t["weighing_ref"])
+        breakdown = []
+        for r in alloc_rows:
+            row = dict(r)
+            row["weighing_refs"] = tickets_by_allocation.get(r["allocation_id"], [])
+            breakdown.append(row)
+        return breakdown
+    finally:
+        conn.close()

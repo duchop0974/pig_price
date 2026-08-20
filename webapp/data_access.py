@@ -424,6 +424,11 @@ def list_idle_supply_locked(farm_ids: list[int] | None = None, days: int = 7, li
         return sale_plans_repo.list_idle_supply(DB_PATH, farm_ids=farm_ids, days=days, limit=limit)
 
 
+def get_plan_sale_breakdown_locked(plan_id: int) -> list[dict]:
+    with db_lock:
+        return sale_plans_repo.get_plan_sale_breakdown(plan_id, DB_PATH)
+
+
 def list_deliveries_missing_weight_locked(farm_ids: list[int] | None = None, limit: int = 10) -> dict:
     with db_lock:
         return sale_deliveries_repo.list_deliveries_missing_weight(DB_PATH, farm_ids=farm_ids, limit=limit)
