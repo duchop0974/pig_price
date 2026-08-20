@@ -25,6 +25,9 @@
       <div class="nav-group">
         <div class="nav-group-title">Vận hành</div>
         <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.index' else '' }}" href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+        {% if current_user_can('plans.revenue_details') or current_user_can('plans.allocation_create') or current_user_can('plans.delivery_create') or current_user_can('admin.permissions.manage') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.canh_bao' else '' }}" href="{{ url_for('dashboard.canh_bao') }}">🚨 Cảnh báo</a>
+        {% endif %}
         <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
         <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch trại</a>
         {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}

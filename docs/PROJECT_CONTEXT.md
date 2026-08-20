@@ -1438,6 +1438,85 @@ Verify mỗi phase: qua Browser pane thật (không chỉ đọc code) — deskt
 modal mở/điền đúng giá trị, DB thật sạch sau khi verify. 22/22 test
 pytest PASS xuyên suốt cả 6 phase.
 
+### 11. STEP 9 (Task Center) + STEP 10 (Exception Center) — 2026-08-20
+
+Theo mục 15 tài liệu refactor (Control Tower): Task Center trả lời "Tôi
+cần làm gì?", Exception Center trả lời "Có vấn đề gì cần xử lý?" — tài
+liệu không nêu tiêu chí phân biệt cụ thể, phải tự định nghĩa.
+
+**STEP 9 — đã thực chất tồn tại, không cần code thêm**: khối "⚠️ Cần xử
+lý" trên Tổng quan (`webapp/routes/dashboard.py::_build_exceptions()`)
+đã liệt kê đúng 5 việc-cần-làm cá nhân hoá theo quyền (kế hoạch chờ
+duyệt, quá ngày chưa xuất chuồng, đơn chưa chốt bán, đơn chưa ghi doanh
+thu, kế hoạch cần đối soát) — thực chất là Task Center dù tên hàm gây
+nhầm (giữ nguyên tên, tránh diff không cần thiết).
+
+**STEP 10 — Exception Center mới, khác Task Center về BẢN CHẤT**: Task
+Center là việc-thường-quy đang chờ (sẽ luôn có, không phải dấu hiệu sai);
+Exception là bất thường/trễ hạn nghiêm trọng/rủi ro mất dữ liệu — thứ
+KHÔNG NÊN tồn tại nếu vận hành trơn tru. 4 tiêu chí, tất cả suy ra được
+từ dữ liệu có sẵn, **không thêm cột/bảng nào** (đúng nguyên tắc "thuần
+cộng thêm"):
+
+1. **Đơn "Đã bán" ≥14 ngày chưa ghi doanh thu**
+   (`sale_orders_repo.list_stale_awaiting_revenue()`) — khác Task
+   Center's mục doanh thu (liệt kê TẤT CẢ) ở chỗ chỉ lấy bản ĐÃ TRỄ HẠN.
+   `sale_orders` không có cột "done_at" — suy thời điểm `mark_done` từ
+   `audit_log` (`action='order.mark_done'`). **2 bẫy SQLite gặp phải**:
+   (a) `audit_log.entity_id` khai TEXT, phải `CAST(entity_id AS
+   INTEGER)` mới so đúng với `sale_orders.id` (INTEGER) trong `IN
+   (...)`; (b) `audit_log.at` lưu ISO8601 KÈM offset giờ VN (VD
+   `"...T09:38:35+07:00"`), khác định dạng UTC `"YYYY-MM-DD HH:MM:SS"`
+   của `datetime('now')` — so sánh chuỗi thô sai âm thầm (không lỗi,
+   chỉ trả sai kết quả), phải bọc `datetime(at)` để SQLite tự quy đổi
+   trước khi so.
+2. **Kế hoạch đã duyệt + đã xuất chuồng (`received_at` có giá trị) ≥7
+   ngày mà còn `remaining_quantity > 0`**
+   (`sale_plans_repo.list_idle_supply()`) — nguồn cung sẵn sàng bán
+   nhưng ứ đọng lâu (chi phí nuôi giữ, heo giảm chất lượng). Tái dùng
+   `list_sale_plans()` + lọc Python (khuôn `list_needs_reconciliation()`
+   có sẵn) — `received_at` ghi bằng `datetime.now().isoformat(...)`
+   Python-side (naive, không offset) nên so sánh chuỗi Python-side an
+   toàn, không dính bẫy timezone như mục 1.
+3. **Bản ghi xuất giao thiếu trọng lượng**
+   (`sale_deliveries_repo.list_deliveries_missing_weight()`, `WHERE
+   total_weight_kg IS NULL`) — vi phạm nguyên tắc "dữ liệu bất di bất
+   dịch phải căn cứ theo kết quả cân thực tế" (mục I.1).
+4. **Vai trò `farm` được cấp quyền vượt phạm vi mặc định**
+   (`roles_repo.list_unexpected_farm_permissions()`, mặc định chỉ
+   `plans.create`/`plans.receive`) — biến rủi ro đã vá ở STEP 3
+   (farm-scope check) thành tín hiệu giám sát SỐNG: nếu admin lỡ cấp
+   thêm quyền cho role `farm` qua `/admin/permissions`, Exception Center
+   tự cảnh báo ngay.
+
+**Wiring**: 4 wrapper `*_locked()` trong `webapp/data_access.py` (khuôn
+các hàm liền kề) → `_build_true_exceptions(farm_ids)` trong
+`webapp/routes/dashboard.py` (mỗi mục gate 1 permission: mục 1
+`PLAN_REVENUE_DETAILS`, mục 2 `PLAN_ALLOCATION_CREATE`, mục 3
+`DELIVERY_CREATE`, mục 4 `ADMIN_PERMISSIONS_MANAGE`) → route mới `GET
+/canh-bao` (`@permission_required(*_VIEW_EXCEPTION_PERMS)`, vào được nếu
+có ÍT NHẤT 1/4 quyền, khuôn `_VIEW_PLAN_RECONCILE_PERMS`) → template mới
+`webapp/templates/canh_bao.html` (copy khuôn `.alert.exception-group`
+của khối "Cần xử lý" nhưng dùng `.alert-danger` thay `.alert-warning` —
+CSS có sẵn, phân biệt sắc thái "vấn đề thật" khỏi "việc thường quy") →
+nav link "🚨 Cảnh báo" trong `base.html` (nhóm VẬN HÀNH, ngay sau "Tổng
+quan", gate OR của 4 permission).
+
+Ngưỡng thời gian (14 ngày/7 ngày) là tham số `days=` trong hàm repo
+(không hardcode rải rác) — số khởi điểm hợp lý dựa trên chu kỳ nghiệp vụ
+đã biết, chỉnh lại dễ dàng nếu cần.
+
+Verify: `tests/services/test_exception_center.py` (4 test, gọi thẳng
+hàm repo, seed dữ liệu qua `admin_client` HTTP — không giả lập SQL trực
+tiếp vì cần đúng service/audit layer ghi lại thời điểm thật) — riêng
+mục 1 cần backdate `audit_log.at` thủ công (trên DB tạm) để test được
+nhánh "đã trễ hạn" mà không phải chờ 14 ngày thật; 26/26 test pytest
+PASS. UI verify qua Browser pane thật: trạng thái rỗng (đăng nhập admin
+thật, `/canh-bao` không có cảnh báo — DB thật hiện đang sạch) + trạng
+thái có dữ liệu (script Flask test-client trên DB tạm, seed đủ 4 tình
+huống, xác nhận cả 4 khối render đúng nội dung) + nav link "🚨 Cảnh báo"
+xuất hiện đúng vị trí, đúng quyền.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng

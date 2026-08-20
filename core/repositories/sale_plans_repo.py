@@ -958,3 +958,25 @@ def list_needs_reconciliation(db_path: Path, farm_ids: list[int] | None = None, 
     matching = [p for p in all_plans if p.get("reconciliation_status") == "needs_reconciliation"]
     matching.sort(key=lambda p: p["planned_date"])
     return {"total": len(matching), "items": matching[:limit]}
+
+
+def list_idle_supply(db_path: Path, farm_ids: list[int] | None = None, days: int = 7, limit: int = 10) -> dict:
+    """Exception Center (STEP 10): kế hoạch đã duyệt + đã xuất chuồng
+    (received_at có giá trị) từ ÍT NHẤT `days` ngày mà vẫn còn
+    remaining_quantity > 0 (chưa được đưa vào đơn hàng nào) — heo đã
+    sẵn sàng bán nhưng ứ đọng lâu là rủi ro thật (chi phí nuôi giữ,
+    chất lượng heo giảm). Tái dùng list_sale_plans() + lọc Python, đúng
+    khuôn list_needs_reconciliation() ở trên — cùng lý do (dữ liệu nhỏ,
+    tránh định nghĩa "remaining_quantity" lệch giữa 2 nơi)."""
+    threshold = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    all_plans = list_sale_plans(db_path, farm_ids=farm_ids)
+    matching = [
+        p
+        for p in all_plans
+        if p.get("status") == "approved"
+        and p.get("received_at")
+        and p["received_at"] <= threshold
+        and p.get("remaining_quantity", 0) > 0
+    ]
+    matching.sort(key=lambda p: p["received_at"])
+    return {"total": len(matching), "items": matching[:limit]}

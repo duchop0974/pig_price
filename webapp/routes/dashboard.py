@@ -8,13 +8,26 @@ from data_access import (
     list_awaiting_receipt_locked,
     list_awaiting_revenue_locked,
     list_awaiting_sale_details_locked,
+    list_deliveries_missing_weight_locked,
+    list_idle_supply_locked,
     list_needs_reconciliation_locked,
     list_pending_review_locked,
+    list_stale_awaiting_revenue_locked,
+    list_unexpected_farm_permissions_locked,
     pig_type_composition_locked,
 )
-from routes.auth import allowed_farm_ids, current_user_can
+from routes.auth import allowed_farm_ids, current_user_can, permission_required
 
 dashboard_bp = Blueprint("dashboard", __name__)
+
+# Cảnh báo (Exception Center) vào được nếu có ÍT NHẤT 1 trong 4 quyền dưới —
+# khớp khuôn _VIEW_PLAN_RECONCILE_PERMS ở routes/plans.py.
+_VIEW_EXCEPTION_PERMS = (
+    perm.PLAN_REVENUE_DETAILS,
+    perm.PLAN_ALLOCATION_CREATE,
+    perm.DELIVERY_CREATE,
+    perm.ADMIN_PERMISSIONS_MANAGE,
+)
 
 # Các bước của quy trình xuất bán, theo đúng thứ tự nghiệp vụ thực tế —
 # mỗi bước gắn với 1 permission key (gate hiển thị) và 1 endpoint trang đích.
@@ -182,11 +195,100 @@ def _build_exceptions(farm_ids: list[int] | None) -> list[dict]:
     return exceptions
 
 
+def _build_true_exceptions(farm_ids: list[int] | None) -> list[dict]:
+    """Cảnh báo thật (STEP 10) — khác _build_exceptions() (việc-thường-quy
+    đang chờ, sẽ luôn tồn tại) ở chỗ đây là BẤT THƯỜNG/trễ hạn nghiêm
+    trọng/rủi ro mất dữ liệu — thứ không nên tồn tại nếu vận hành trơn
+    tru. Mỗi mục gate theo đúng 1 quyền xử lý vấn đề đó, khớp khuôn
+    _build_exceptions() ở trên."""
+    exceptions = []
+
+    if current_user_can(perm.PLAN_REVENUE_DETAILS):
+        r = list_stale_awaiting_revenue_locked()
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "💰",
+                    "text": f"{r['total']} đơn đã bán quá lâu (≥14 ngày) chưa ghi nhận doanh thu",
+                    "entries": [
+                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        for o in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.allocations_page"),
+                }
+            )
+
+    if current_user_can(perm.PLAN_ALLOCATION_CREATE):
+        r = list_idle_supply_locked(farm_ids=farm_ids)
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "🐖",
+                    "text": f"{r['total']} kế hoạch đã xuất chuồng ứ đọng ≥7 ngày chưa đưa vào đơn hàng nào",
+                    "entries": [
+                        {
+                            "label": f"{p['plan_code']} · {p['farm']} · còn {p['remaining_quantity']} con",
+                            "url": url_for("plans.plans_page", highlight=p["id"]),
+                        }
+                        for p in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("plans.plans_page"),
+                }
+            )
+
+    if current_user_can(perm.DELIVERY_CREATE):
+        r = list_deliveries_missing_weight_locked(farm_ids=farm_ids)
+        if r["total"]:
+            exceptions.append(
+                {
+                    "icon": "⚖️",
+                    "text": f"{r['total']} bản ghi xuất giao thiếu trọng lượng cân thực tế",
+                    "entries": [
+                        {
+                            "label": f"{d['plan_code']} · {d['farm']} · {d['delivered_date']}",
+                            "url": url_for("deliveries.xuat_giao_page", highlight=d["id"]),
+                        }
+                        for d in r["items"]
+                    ],
+                    "total": r["total"],
+                    "more_url": url_for("deliveries.xuat_giao_page"),
+                }
+            )
+
+    if current_user_can(perm.ADMIN_PERMISSIONS_MANAGE):
+        extra_keys = list_unexpected_farm_permissions_locked()
+        if extra_keys:
+            exceptions.append(
+                {
+                    "icon": "🔓",
+                    "text": f"Vai trò 'farm' đang có {len(extra_keys)} quyền vượt phạm vi mặc định",
+                    "entries": [
+                        {"label": perm.label(key), "url": url_for("admin.admin_permissions_page")}
+                        for key in extra_keys
+                    ],
+                    "total": len(extra_keys),
+                    "more_url": url_for("admin.admin_permissions_page"),
+                }
+            )
+
+    return exceptions
+
+
 @dashboard_bp.route("/")
 def index():
     farm_ids = allowed_farm_ids(session["user"])
     exceptions = _build_exceptions(farm_ids)
     return render_template("dashboard.html", exceptions=exceptions)
+
+
+@dashboard_bp.route("/canh-bao")
+@permission_required(*_VIEW_EXCEPTION_PERMS)
+def canh_bao():
+    farm_ids = allowed_farm_ids(session["user"])
+    exceptions = _build_true_exceptions(farm_ids)
+    return render_template("canh_bao.html", exceptions=exceptions)
 
 
 @dashboard_bp.route("/api/dashboard/summary", methods=["GET"])

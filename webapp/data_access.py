@@ -409,6 +409,32 @@ def list_awaiting_revenue_locked(limit: int = 5) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Cảnh báo (Exception Center — STEP 10, khác Cần xử lý ở trên: chỉ bất
+# thường/trễ hạn nghiêm trọng, không phải việc thường quy)
+# ---------------------------------------------------------------------------
+
+
+def list_stale_awaiting_revenue_locked(days: int = 14, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_orders_repo.list_stale_awaiting_revenue(DB_PATH, days=days, limit=limit)
+
+
+def list_idle_supply_locked(farm_ids: list[int] | None = None, days: int = 7, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_plans_repo.list_idle_supply(DB_PATH, farm_ids=farm_ids, days=days, limit=limit)
+
+
+def list_deliveries_missing_weight_locked(farm_ids: list[int] | None = None, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries_missing_weight(DB_PATH, farm_ids=farm_ids, limit=limit)
+
+
+def list_unexpected_farm_permissions_locked() -> list[str]:
+    with db_lock:
+        return roles_repo.list_unexpected_farm_permissions(DB_PATH)
+
+
+# ---------------------------------------------------------------------------
 # Heo loại/hủy (incident_reports) + ảnh bằng chứng (media_proof)
 # ---------------------------------------------------------------------------
 

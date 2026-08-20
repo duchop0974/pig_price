@@ -401,6 +401,48 @@ def list_awaiting_revenue(db_path: Path, limit: int = 5) -> dict:
         conn.close()
 
 
+def list_stale_awaiting_revenue(db_path: Path, days: int = 14, limit: int = 10) -> dict:
+    """Exception Center (STEP 10): đơn "Đã bán" nhưng ĐÃ QUÁ `days` ngày
+    vẫn chưa ghi doanh thu — khác list_awaiting_revenue() ở chỗ chỉ lấy
+    bản đã trễ hạn thật sự, không phải mọi đơn đang chờ (việc thường quy).
+    sale_orders không có cột "done_at" — suy thời điểm mark-done từ
+    audit_log (action='order.mark_done', ghi mỗi lần đơn chuyển 'done'
+    qua order_service.update_status(), xem core/audit_actions.py), lấy
+    MAX(created_at) phòng trường hợp có nhiều lần ghi (không nên xảy ra
+    nhưng an toàn hơn lấy bản mới nhất)."""
+    if not db_path.exists():
+        return {"total": 0, "items": []}
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        # audit_log.entity_id có TEXT affinity (cột khai báo TEXT) — SQLite tự
+        # ép giá trị INTEGER truyền vào thành chuỗi lúc lưu, nên phải CAST lại
+        # về INTEGER mới so sánh đúng với so.id (khác storage class INTEGER
+        # vs TEXT thì SQLite không tự coi là bằng nhau trong IN (...)).
+        # audit_log.at lưu ISO8601 kèm offset giờ VN (VD "...T09:38:35+07:00",
+        # xem extensions.py/audit_repo.py) — khác định dạng "YYYY-MM-DD
+        # HH:MM:SS" UTC mà datetime('now') trả về, so sánh chuỗi thô sẽ sai;
+        # bọc datetime(at) để SQLite tự quy đổi về cùng định dạng/UTC trước
+        # khi so sánh.
+        where = (
+            "WHERE so.status = 'done' AND so.paid_amount IS NULL "
+            "AND so.id IN ("
+            "  SELECT CAST(entity_id AS INTEGER) FROM audit_log"
+            "  WHERE action = 'order.mark_done' AND entity_type = 'sale_order'"
+            "  GROUP BY entity_id"
+            "  HAVING MAX(datetime(at)) <= datetime('now', ?)"
+            ")"
+        )
+        params = (f"-{days} days",)
+        total = conn.execute(f"SELECT COUNT(*) FROM sale_orders so {where}", params).fetchone()[0]
+        rows = conn.execute(
+            f"{_ORDER_SELECT_VISIBLE} {where} ORDER BY so.created_at ASC LIMIT ?", (*params, limit)
+        ).fetchall()
+        return {"total": total, "items": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
 def list_orders(db_path: Path) -> list[dict]:
     if not db_path.exists():
         return []

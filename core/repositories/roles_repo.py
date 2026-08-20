@@ -80,6 +80,22 @@ def list_permissions_for_role(role_key: str, db_path: Path) -> list[str]:
         conn.close()
 
 
+_FARM_ROLE_KEY = "farm"
+_FARM_ROLE_EXPECTED_PERMISSIONS = ("plans.create", "plans.receive")
+
+
+def list_unexpected_farm_permissions(
+    db_path: Path, expected: tuple[str, ...] = _FARM_ROLE_EXPECTED_PERMISSIONS
+) -> list[str]:
+    """Exception Center (STEP 10): quyền role 'farm' đang có NGOÀI phạm vi
+    mặc định — tín hiệu giám sát sống cho đúng rủi ro đã vá ở STEP 3
+    (farm-scope check): nếu admin lỡ cấp thêm quyền review/delete/... cho
+    role 'farm' qua /admin/permissions, user vai trò farm sẽ thao tác
+    được trên dữ liệu của BẤT KỲ trại nào, không chỉ trại được gán."""
+    current = list_permissions_for_role(_FARM_ROLE_KEY, db_path)
+    return sorted(key for key in current if key not in expected)
+
+
 def set_permissions_for_role(
     role_key: str, permission_keys: list[str], db_path: Path, conn: sqlite3.Connection | None = None
 ) -> None:
