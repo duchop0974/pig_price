@@ -4,7 +4,7 @@ mà không phải sửa số kế hoạch gốc.
 
 Tách khỏi routes/plans.py (đã >1200 dòng) theo đúng tiền lệ routes/incidents.py.
 Không có PATCH — sửa = xoá + tạo lại, khớp quy ước của incident/đối soát."""
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, render_template, request, session
 
 from core.services import delivery_service
 from core import permissions as perm
@@ -14,6 +14,7 @@ from data_access import (
     get_plan_locked,
     list_deliveries_for_order_locked,
     list_deliveries_for_plan_locked,
+    list_deliveries_locked,
 )
 from extensions import DB_PATH
 from routes.auth import allowed_farm_ids, permission_required
@@ -29,6 +30,24 @@ _VIEW_ORDER_PERMS = (
     perm.PLAN_REVENUE_DETAILS,
 )
 _VIEW_PLAN_PERMS = (perm.PLAN_REVIEW, perm.PLAN_RECEIVE, perm.PLAN_EDIT, perm.DELIVERY_CREATE)
+
+
+@deliveries_bp.route("/xuat-giao")
+@permission_required(*_VIEW_PLAN_PERMS)
+def xuat_giao_page():
+    """Trang danh sách toàn bộ lần xuất giao (STEP 8 Enterprise UI) — dữ
+    liệu load qua JS (fetch /api/deliveries), không truyền gì qua Jinja,
+    khớp khuôn allocations_page()/doi_soat_page()."""
+    return render_template("xuat_giao.html")
+
+
+@deliveries_bp.route("/api/deliveries", methods=["GET"])
+@permission_required(*_VIEW_PLAN_PERMS)
+def api_deliveries_list():
+    farm_ids = allowed_farm_ids(session["user"])
+    if farm_ids is not None and not farm_ids:
+        return jsonify([])
+    return jsonify(list_deliveries_locked(farm_ids=farm_ids))
 
 
 @deliveries_bp.route("/api/orders/<int:order_id>/lines/<int:line_id>/deliveries", methods=["POST"])

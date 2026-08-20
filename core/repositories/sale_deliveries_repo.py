@@ -173,6 +173,38 @@ def list_deliveries_for_order(order_id: int, db_path: Path) -> list[dict]:
         conn.close()
 
 
+def list_deliveries(db_path: Path, farm_ids: list[int] | None = None) -> list[dict]:
+    """Mọi lần xuất giao trong toàn hệ thống — dùng cho trang "Xuất giao"
+    độc lập. `farm_ids=None`: không giới hạn trại (sales/accounting/admin/
+    leadership). `farm_ids=[...]`: chỉ các trại đó (vai trò farm) — gọi
+    với `farm_ids=[]` là lỗi (IN () rỗng không hợp lệ trong SQLite), tầng
+    route phải tự chặn trả `[]` ngay, khớp quy ước
+    sale_plans_repo.list_sale_plans()."""
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        sql = _SELECT_JOINED.replace(
+            "sa.sale_plan_id, sa.plan_code, sa.quantity AS line_quantity, ",
+            "sa.sale_plan_id, sa.plan_code, sa.quantity AS line_quantity, sp.farm_id, f.code AS farm, ",
+        ).replace(
+            "JOIN sale_allocations sa ON sa.id = sd.allocation_id",
+            "JOIN sale_allocations sa ON sa.id = sd.allocation_id "
+            "JOIN sale_plans sp ON sp.id = sa.sale_plan_id "
+            "LEFT JOIN farms f ON f.id = sp.farm_id",
+        )
+        params: tuple = ()
+        if farm_ids is not None:
+            placeholders = ", ".join("?" * len(farm_ids))
+            sql += f" WHERE sp.farm_id IN ({placeholders})"
+            params = tuple(farm_ids)
+        rows = conn.execute(
+            sql + " ORDER BY sd.delivered_date DESC, sd.id DESC", params
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def list_deliveries_for_plan(sale_plan_id: int, db_path: Path) -> list[dict]:
     """Mọi lần xuất thuộc 1 kế hoạch trại, xuyên qua mọi đơn/khách hàng —
     dùng cho panel đối soát chi tiết của kế hoạch."""

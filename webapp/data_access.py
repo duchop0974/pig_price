@@ -536,6 +536,11 @@ def list_deliveries_for_plan_locked(sale_plan_id: int) -> list[dict]:
         return sale_deliveries_repo.list_deliveries_for_plan(sale_plan_id, DB_PATH)
 
 
+def list_deliveries_locked(farm_ids: list[int] | None = None) -> list[dict]:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries(DB_PATH, farm_ids=farm_ids)
+
+
 def delete_delivery_locked(delivery_id: int) -> tuple[bool, str | None]:
     with db_lock:
         return sale_deliveries_repo.delete_delivery(delivery_id, DB_PATH)

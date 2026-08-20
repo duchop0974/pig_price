@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Xuất giao{% endblock %}
+{% block brand_title %}🚚 Xuất giao{% endblock %}
+{% block brand_sub %}Toàn bộ lần xuất giao thực tế — mọi kế hoạch/đơn hàng{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Xuất giao</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🚚 Xuất giao</h1>
+    <p class="page-header-desc">Danh sách toàn bộ lần xuất giao thực tế, không phân biệt kế hoạch/đơn hàng</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="kpi-grid">
+      <div class="kpi-tile">
+        <div class="kpi-label">Tổng số lần xuất</div>
+        <div class="kpi-value" id="xg-count-total">—<span class="unit">lần</span></div>
+      </div>
+      <div class="kpi-tile kpi-sold">
+        <div class="kpi-label">Tổng số con</div>
+        <div class="kpi-value" id="xg-count-quantity">—<span class="unit">con</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>Danh sách lần xuất giao</h2>
+    </div>
+    <div class="filter-bar">
+      <div class="control-row">
+        <select id="xg-filter-farm"><option value="">Tất cả trại</option></select>
+        <select id="xg-filter-pig-type"><option value="">Tất cả loại heo</option></select>
+        <input type="date" id="xg-filter-date-from" title="Ngày xuất từ">
+        <input type="date" id="xg-filter-date-to" title="Ngày xuất đến">
+        <input type="text" id="xg-filter-search" placeholder="Tìm mã kế hoạch, đơn hàng, khách hàng...">
+      </div>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table admin-table-responsive">
+        <thead>
+          <tr>
+            <th>Ngày xuất</th>
+            <th>Kế hoạch</th>
+            <th>Đơn hàng</th>
+            <th>Khách hàng</th>
+            <th>Loại heo</th>
+            <th>Số lượng</th>
+            <th>Trọng lượng</th>
+            <th>Đơn giá</th>
+            <th>Trạng thái</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="xuat-giao-list"></tbody>
+      </table>
+    </div>
+    <p id="xuat-giao-empty" class="msg hidden">Không có lần xuất giao nào khớp bộ lọc.</p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};
+  window.CURRENT_USER_ROLE = "{{ current_user.role }}";
+</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/xuat_giao.js') }}"></script>
+{% endblock %}
