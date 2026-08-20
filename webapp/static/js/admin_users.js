@@ -36,40 +36,56 @@ async function handleListClick(e) {
   const deleteBtn = e.target.closest(".btn-delete-user");
 
   if (deleteBtn) {
-    if (!confirm("Xoá VĨNH VIỄN tài khoản này? Không thể hoàn tác.")) return;
+    const ok = await confirmModal({
+      title: "Xoá vĩnh viễn tài khoản?",
+      body: "Không thể hoàn tác.",
+      confirmLabel: "Xoá vĩnh viễn",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/users/${deleteBtn.dataset.id}`, { method: "DELETE" });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi xoá tài khoản.");
+      showToast(payload.error || "Lỗi khi xoá tài khoản.", "danger");
       return;
     }
+    showToast("Đã xoá tài khoản.", "success");
     location.reload();
   } else if (toggleBtn) {
     const id = toggleBtn.dataset.id;
     const currentlyActive = toggleBtn.dataset.active === "1";
     const label = currentlyActive ? "khoá" : "mở lại";
-    if (!confirm(`Xác nhận ${label} tài khoản này?`)) return;
-    await fetch(`/api/admin/users/${id}/toggle`, {
+    const ok = await confirmModal({ title: `Xác nhận ${label} tài khoản?`, confirmLabel: currentlyActive ? "Khoá" : "Mở lại" });
+    if (!ok) return;
+    const res = await fetch(`/api/admin/users/${id}/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_active: !currentlyActive }),
     });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(payload.error || "Lỗi khi cập nhật trạng thái.", "danger");
+      return;
+    }
     location.reload();
   } else if (resetBtn) {
     const id = resetBtn.dataset.id;
-    const password = prompt("Nhập mật khẩu mới (tối thiểu 6 ký tự):");
-    if (!password) return;
+    const password = await promptModal({
+      title: "Đặt lại mật khẩu",
+      label: "Mật khẩu mới (tối thiểu 6 ký tự)",
+      required: true,
+    });
+    if (password === null) return;
     const res = await fetch(`/api/admin/users/${id}/reset-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi đặt lại mật khẩu.");
+      showToast(payload.error || "Lỗi khi đặt lại mật khẩu.", "danger");
       return;
     }
-    alert("Đã đặt lại mật khẩu.");
+    showToast("Đã đặt lại mật khẩu.", "success");
   } else if (assignBtn) {
     await openFarmAssignModal(assignBtn.dataset.id);
   }
@@ -80,8 +96,14 @@ async function handleRoleChange(e) {
   if (!select) return;
   const id = select.dataset.id;
   const role = select.value;
-  if (!confirm(`Đổi vai trò tài khoản này thành "${select.options[select.selectedIndex].text}"?`)) {
-    location.reload();
+  const previousValue = select.dataset.previousValue || role;
+  const ok = await confirmModal({
+    title: "Đổi vai trò tài khoản?",
+    body: `Đổi vai trò tài khoản này thành "${select.options[select.selectedIndex].text}"?`,
+    confirmLabel: "Đổi vai trò",
+  });
+  if (!ok) {
+    select.value = previousValue;
     return;
   }
   const res = await fetch(`/api/admin/users/${id}/role`, {
@@ -91,7 +113,7 @@ async function handleRoleChange(e) {
   });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
-    alert(payload.error || "Lỗi khi đổi vai trò.");
+    showToast(payload.error || "Lỗi khi đổi vai trò.", "danger");
   }
   location.reload();
 }
@@ -138,11 +160,12 @@ async function saveFarmAssign() {
   });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
-    alert(payload.error || "Lỗi khi gán trang trại.");
+    showToast(payload.error || "Lỗi khi gán trang trại.", "danger");
     return;
   }
   const userId = farmAssignUserId;
   closeFarmAssignModal();
+  showToast("Đã gán trang trại.", "success");
   await loadFarmsList(userId);
 }
 
@@ -153,3 +176,4 @@ el("farm-assign-save").addEventListener("click", saveFarmAssign);
 el("farm-assign-cancel").addEventListener("click", closeFarmAssignModal);
 
 document.querySelectorAll(".farms-list").forEach((span) => loadFarmsList(span.dataset.id));
+document.querySelectorAll(".role-select").forEach((select) => { select.dataset.previousValue = select.value; });

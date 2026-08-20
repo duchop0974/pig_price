@@ -3,6 +3,23 @@
 {% block brand_title %}🏠 Quản lý trang trại / khu{% endblock %}
 {% block brand_sub %}Chỉnh sửa: Admin · Xem: Admin, Ban lãnh đạo{% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Trang trại / Khu</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🏠 Trang trại / Khu</h1>
+    <p class="page-header-desc">Danh mục trang trại và khu chăn nuôi</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   {% if current_user_can('admin.farms.manage') %}
   <section class="card">
@@ -27,7 +44,7 @@
   <section class="card">
     <h2>Danh sách trang trại</h2>
     <div class="admin-table-wrap">
-      <table class="admin-table">
+      <table class="admin-table admin-table-responsive">
         <thead>
           <tr>
             <th>Mã trang trại</th>
@@ -38,8 +55,8 @@
         <tbody id="farm-list">
           {% for f in farms %}
           <tr data-id="{{ f.id }}">
-            <td>{{ f.code }}</td>
-            <td>{{ f.province or '—' }}</td>
+            <td data-label="Mã trang trại">{{ f.code }}</td>
+            <td data-label="Tỉnh/thành">{{ f.province or '—' }}</td>
             <td>
               {% if current_user_can('admin.farms.manage') %}
               <button type="button" class="btn btn-ghost btn-sm btn-farm-edit" data-id="{{ f.id }}" data-code="{{ f.code }}" data-province="{{ f.province or '' }}">Sửa</button>
@@ -72,7 +89,7 @@
     </form>
     {% endif %}
     <div class="admin-table-wrap">
-      <table class="admin-table">
+      <table class="admin-table admin-table-responsive">
         <thead>
           <tr>
             <th>Tên khu</th>

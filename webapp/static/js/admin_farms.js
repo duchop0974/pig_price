@@ -29,7 +29,7 @@ async function loadZoneList() {
     ? zones
         .map(
           (z) => `<tr data-id="${z.id}">
-        <td>${z.code}</td>
+        <td data-label="Tên khu">${z.code}</td>
         <td>
           ${canEdit ? `<button type="button" class="btn btn-ghost btn-sm btn-zone-edit" data-id="${z.id}" data-code="${z.code}">Sửa</button>
           <button type="button" class="btn btn-ghost btn-sm btn-zone-delete" data-id="${z.id}">Xóa</button>` : ""}
@@ -75,28 +75,40 @@ async function handleFarmListClick(e) {
 
   if (editBtn) {
     const id = editBtn.dataset.id;
-    const code = (prompt("Mã trang trại:", editBtn.dataset.code) || "").trim();
-    if (!code) return;
-    const province = (prompt("Tỉnh/thành:", editBtn.dataset.province) || "").trim();
+    const code = await promptModal({ title: "Sửa trang trại", label: "Mã trang trại", initialValue: editBtn.dataset.code });
+    if (code === null) return;
+    if (!code.trim()) {
+      showToast("Vui lòng nhập mã trang trại.", "danger");
+      return;
+    }
+    const province = await promptModal({ title: "Sửa trang trại", label: "Tỉnh/thành", initialValue: editBtn.dataset.province });
+    if (province === null) return;
     const res = await fetch(`/api/admin/farms/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code, province }),
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi sửa trang trại.");
+      showToast(payload.error || "Lỗi khi sửa trang trại.", "danger");
       return;
     }
+    showToast("Đã lưu trang trại.", "success");
     location.reload();
   } else if (delBtn) {
-    if (!confirm("Xóa trang trại này? (chỉ xóa được nếu chưa có kế hoạch nào dùng, sẽ xóa luôn các khu bên trong)")) return;
+    const ok = await confirmModal({
+      title: "Xoá trang trại?",
+      body: "Chỉ xoá được nếu chưa có kế hoạch nào dùng — sẽ xoá luôn các khu bên trong.",
+      confirmLabel: "Xoá vĩnh viễn",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/farms/${delBtn.dataset.id}`, { method: "DELETE" });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi xóa trang trại.");
+      showToast(payload.error || "Lỗi khi xóa trang trại.", "danger");
       return;
     }
+    showToast("Đã xoá trang trại.", "success");
     location.reload();
   }
 }
@@ -138,27 +150,34 @@ async function handleZoneListClick(e) {
   const delBtn = e.target.closest(".btn-zone-delete");
 
   if (editBtn) {
-    const code = (prompt("Tên khu:", editBtn.dataset.code) || "").trim();
-    if (!code) return;
+    const code = await promptModal({ title: "Sửa khu", label: "Tên khu", initialValue: editBtn.dataset.code, required: true });
+    if (code === null) return;
     const res = await fetch(`/api/admin/zones/${editBtn.dataset.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code }),
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi sửa khu.");
+      showToast(payload.error || "Lỗi khi sửa khu.", "danger");
       return;
     }
+    showToast("Đã lưu khu.", "success");
     await loadZoneList();
   } else if (delBtn) {
-    if (!confirm("Xóa khu này? (chỉ xóa được nếu chưa có kế hoạch nào dùng)")) return;
+    const ok = await confirmModal({
+      title: "Xoá khu?",
+      body: "Chỉ xoá được nếu chưa có kế hoạch nào dùng.",
+      confirmLabel: "Xoá vĩnh viễn",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/admin/zones/${delBtn.dataset.id}`, { method: "DELETE" });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi xóa khu.");
+      showToast(payload.error || "Lỗi khi xóa khu.", "danger");
       return;
     }
+    showToast("Đã xoá khu.", "success");
     await loadZoneList();
   }
 }

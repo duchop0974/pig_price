@@ -3,6 +3,23 @@
 {% block brand_title %}🐖 Danh mục loại heo bán{% endblock %}
 {% block brand_sub %}Chỉnh sửa: Admin · Xem: Admin, Ban lãnh đạo{% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Danh mục heo</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🐖 Danh mục loại heo bán</h1>
+    <p class="page-header-desc">Danh mục loại heo dùng trong kế hoạch/đơn hàng/xuất giao</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   {% if current_user_can('admin.pig_types.manage') %}
   <section class="card">
@@ -27,7 +44,7 @@
   <section class="card">
     <h2>Danh sách loại heo</h2>
     <div class="admin-table-wrap">
-      <table class="admin-table">
+      <table class="admin-table admin-table-responsive">
         <thead>
           <tr>
             <th>Mã</th>
@@ -39,10 +56,10 @@
         <tbody id="pig-type-list">
           {% for pt in pig_types %}
           <tr data-id="{{ pt.id }}">
-            <td>{{ pt.code }}</td>
-            <td>{{ pt.name }}</td>
-            <td>
-              <span class="status-dot {{ '' if pt.is_active else 'inactive' }}">{{ 'Đang dùng' if pt.is_active else 'Đã khoá' }}</span>
+            <td data-label="Mã">{{ pt.code }}</td>
+            <td data-label="Tên hiển thị">{{ pt.name }}</td>
+            <td data-label="Trạng thái">
+              <span class="badge {{ 'badge-success' if pt.is_active else '' }}">{{ 'Đang dùng' if pt.is_active else 'Đã khoá' }}</span>
             </td>
             <td>
               {% if current_user_can('admin.pig_types.manage') %}
@@ -50,7 +67,7 @@
               <button type="button" class="btn btn-ghost btn-sm btn-pt-toggle" data-id="{{ pt.id }}" data-active="{{ 1 if pt.is_active else 0 }}">
                 {{ 'Khoá' if pt.is_active else 'Mở lại' }}
               </button>
-              <button type="button" class="btn btn-ghost btn-sm btn-pt-delete" data-id="{{ pt.id }}">Xóa</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-danger btn-pt-delete" data-id="{{ pt.id }}">Xóa</button>
               {% endif %}
             </td>
           </tr>

@@ -3,6 +3,23 @@
 {% block brand_title %}🤝 Khách hàng{% endblock %}
 {% block brand_sub %}Danh mục khách hàng mua heo{% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Khách hàng</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🤝 Khách hàng</h1>
+    <p class="page-header-desc">Danh mục khách hàng mua heo</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   {% if current_user_can('customers.manage') %}
   <section class="card">
@@ -51,7 +68,7 @@
   <section class="card">
     <h2>Danh sách khách hàng</h2>
     <div class="admin-table-wrap">
-      <table class="admin-table">
+      <table class="admin-table admin-table-responsive">
         <thead>
           <tr>
             <th>Tên</th>
@@ -66,13 +83,13 @@
         <tbody id="customer-list">
           {% for c in customers %}
           <tr data-id="{{ c.id }}">
-            <td>{{ c.name }}</td>
-            <td>{{ c.phone or "" }}</td>
-            <td>{{ c.address or "" }}</td>
-            <td>{{ c.tax_code or "" }}</td>
-            <td>{{ c.email or "" }}</td>
-            <td>
-              <span class="status-dot {{ '' if c.is_active else 'inactive' }}">{{ 'Đang dùng' if c.is_active else 'Đã khoá' }}</span>
+            <td data-label="Tên">{{ c.name }}</td>
+            <td data-label="Số điện thoại">{{ c.phone or "" }}</td>
+            <td data-label="Địa chỉ">{{ c.address or "" }}</td>
+            <td data-label="Mã số thuế">{{ c.tax_code or "" }}</td>
+            <td data-label="Email">{{ c.email or "" }}</td>
+            <td data-label="Trạng thái">
+              <span class="badge {{ 'badge-success' if c.is_active else '' }}">{{ 'Đang dùng' if c.is_active else 'Đã khoá' }}</span>
             </td>
             <td>
               {% if current_user_can('customers.manage') %}
@@ -84,7 +101,7 @@
               <button type="button" class="btn btn-ghost btn-sm btn-cus-toggle" data-id="{{ c.id }}" data-active="{{ 1 if c.is_active else 0 }}">
                 {{ 'Khoá' if c.is_active else 'Mở lại' }}
               </button>
-              <button type="button" class="btn btn-ghost btn-sm btn-cus-delete" data-id="{{ c.id }}">Xóa</button>
+              <button type="button" class="btn btn-ghost btn-sm btn-danger btn-cus-delete" data-id="{{ c.id }}">Xóa</button>
               {% endif %}
             </td>
           </tr>
@@ -93,6 +110,49 @@
       </table>
     </div>
   </section>
+
+  <div id="cus-edit-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <h3>Sửa khách hàng</h3>
+      <div class="control-row">
+        <label for="ce-name">Tên</label>
+        <input type="text" id="ce-name" required>
+      </div>
+      <div class="control-row">
+        <label for="ce-phone">Số điện thoại</label>
+        <input type="text" id="ce-phone">
+      </div>
+      <div class="control-row">
+        <label for="ce-address">Địa chỉ</label>
+        <input type="text" id="ce-address">
+      </div>
+      <div class="control-row">
+        <label for="ce-tax-code">Mã số thuế</label>
+        <input type="text" id="ce-tax-code">
+      </div>
+      <div class="control-row">
+        <label for="ce-email">Email</label>
+        <input type="text" id="ce-email">
+      </div>
+      <div class="control-row">
+        <label for="ce-contact-person">Người liên hệ</label>
+        <input type="text" id="ce-contact-person">
+      </div>
+      <div class="control-row">
+        <label for="ce-contact-title">Chức vụ người liên hệ</label>
+        <input type="text" id="ce-contact-title">
+      </div>
+      <div class="control-row">
+        <label for="ce-note">Ghi chú</label>
+        <input type="text" id="ce-note">
+      </div>
+      <div class="control-row buttons">
+        <button type="button" id="ce-save" class="btn btn-primary">Lưu</button>
+        <button type="button" id="ce-cancel" class="btn btn-ghost">Huỷ</button>
+      </div>
+      <p id="ce-msg" class="msg"></p>
+    </div>
+  </div>
 {% endblock %}
 
 {% block scripts %}

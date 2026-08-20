@@ -18,6 +18,13 @@ const STATUS_CONFIG = {
   cancelled: { label: "Đã hủy", type: "" },
   disabled: { label: "🚫 Đã vô hiệu hoá", type: "danger" },
   locked: { label: "Đã khóa", type: "dark" },
+  // Trạng thái đối soát kế hoạch trại (reconciliation_status, sale_plans_repo.py)
+  // — dùng ở doi_soat.js, gộp vào đây thay vì hàm dsStatusBadge() cục bộ trùng
+  // lặp (STEP 8 Phase 4).
+  needs_reconciliation: { label: "⚠ Cần đối soát", type: "warning" },
+  in_progress: { label: "Đang trong hạn", type: "" },
+  reconciled: { label: "✓ Đã đối soát", type: "success" },
+  over_delivered: { label: "⚠ Vượt kế hoạch", type: "danger" },
 };
 
 function renderBadge(status) {

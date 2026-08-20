@@ -63,14 +63,6 @@ function applyDsFilters(plans) {
   });
 }
 
-function dsStatusBadge(status) {
-  if (status === "needs_reconciliation") return `<span class="badge badge-warning">⚠ Cần đối soát</span>`;
-  if (status === "in_progress") return `<span class="badge">Đang trong hạn</span>`;
-  if (status === "reconciled") return `<span class="badge badge-success">✓ Đã đối soát</span>`;
-  if (status === "over_delivered") return `<span class="badge badge-danger">⚠ Vượt kế hoạch</span>`;
-  return "";
-}
-
 function dsBreakdownText(breakdown) {
   if (!breakdown || !breakdown.length) return "";
   return breakdown.map((b) => `${RECONCILE_KIND_LABELS_DS[b.kind] || b.kind} ${b.quantity}`).join(", ");
@@ -90,7 +82,7 @@ function planRowHtml(p) {
     <td data-label="Kế hoạch">${fmtPrice(p.quantity)} con</td>
     <td data-label="Đã bán">${fmtPrice(p.actual_sold_quantity)} con</td>
     <td data-label="Chưa xử lý" class="${remainingCls}">${fmtPrice(p.remaining_to_reconcile)} con</td>
-    <td data-label="Trạng thái">${dsStatusBadge(p.reconciliation_status)}</td>
+    <td data-label="Trạng thái">${renderBadge(p.reconciliation_status)}</td>
     <td data-label="Ghi chú">${dsBreakdownText(p.reconciliation_breakdown)}</td>
     <td>${actionHtml}</td>
   </tr>`;
