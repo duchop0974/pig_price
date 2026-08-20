@@ -117,68 +117,6 @@ def order_payload(order: dict, df: pd.DataFrame, nat: dict) -> dict:
     return {**order, "lines": [line_payload(line, df, nat) for line in order["lines"]]}
 
 
-def _parse_expected_avg_weight(data: dict) -> tuple[float | None, str | None]:
-    """Trọng lượng dự kiến (kg/con) — tuỳ chọn. Trả (giá trị, lỗi); rỗng/thiếu
-    -> (None, None) chứ không phải 0, để phân biệt "chưa nhập cân" với "cân
-    bằng 0" (xem _PLANNED_WEIGHT_SQL ở sale_plans_repo.py)."""
-    raw = data.get("expected_avg_weight_kg")
-    if raw is None or str(raw).strip() == "":
-        return None, None
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return None, "Trọng lượng dự kiến không hợp lệ."
-    if value <= 0:
-        return None, "Trọng lượng dự kiến phải lớn hơn 0."
-    return value, None
-
-
-def _validate_order_lines(raw_lines: list) -> tuple[list[dict] | None, str | None]:
-    """Validate 1 hoặc nhiều dòng hàng cùng lúc (dùng cho cả tạo đơn mới lẫn
-    thêm 1 dòng vào đơn có sẵn). Cộng dồn số lượng đã "đặt chỗ" trong CHÍNH
-    request này theo từng sale_plan_id — phòng trường hợp cùng 1 kế hoạch
-    trại xuất hiện ở nhiều dòng trong 1 lần gửi, vượt quá remaining_quantity
-    dù mỗi dòng riêng lẻ có vẻ hợp lệ."""
-    validated: list[dict] = []
-    reserved_by_plan: dict[int, int] = {}
-    plan_cache: dict[int, dict] = {}
-    for raw in raw_lines:
-        if not isinstance(raw, dict):
-            return None, "Dữ liệu dòng hàng không hợp lệ."
-        try:
-            sale_plan_id = int(raw.get("sale_plan_id"))
-        except (TypeError, ValueError):
-            return None, "Vui lòng chọn kế hoạch trại cho từng dòng."
-        plan = plan_cache.get(sale_plan_id)
-        if plan is None:
-            plan = get_plan_locked(sale_plan_id)
-            if plan is None:
-                return None, "Không tìm thấy kế hoạch trại."
-            if plan["status"] != "approved":
-                return None, "Chỉ tạo dòng hàng từ kế hoạch trại đã duyệt."
-            plan_cache[sale_plan_id] = plan
-        try:
-            quantity = int(raw.get("quantity"))
-            if quantity <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return None, "Số lượng không hợp lệ."
-        reserved_by_plan[sale_plan_id] = reserved_by_plan.get(sale_plan_id, 0) + quantity
-        if reserved_by_plan[sale_plan_id] > plan["remaining_quantity"]:
-            return None, f"Vượt quá số lượng còn lại của {plan['plan_code']} ({plan['remaining_quantity']} con)."
-        try:
-            selling_price = int(raw.get("selling_price"))
-            if selling_price <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            return None, "Vui lòng nhập giá chào bán hợp lệ."
-        note = (raw.get("note") or "").strip() or None
-        validated.append(
-            {"sale_plan_id": sale_plan_id, "quantity": quantity, "selling_price": selling_price, "note": note}
-        )
-    return validated, None
-
-
 @plans_bp.route("/ke-hoach")
 def plans_page():
     return render_template("plans.html")
@@ -233,16 +171,11 @@ def api_plans_list():
 @plans_bp.route("/api/plans", methods=["POST"])
 @permission_required(perm.PLAN_CREATE)
 def api_plans_create():
+    """STEP 7 (Route Refactor): validate định dạng/giá trị input đã
+    chuyển vào plan_service._validate_plan_fields() (dùng chung với
+    api_plans_edit()) — route chỉ còn giữ lại đúng phần farm-scope check
+    (403, phải biết farm_id TRƯỚC khi ghi) + gọi service."""
     data = request.get_json(silent=True) or {}
-    planned_date = data.get("planned_date", "")
-    note = (data.get("note") or "").strip() or None
-    shed = (data.get("shed") or "").strip() or None
-    lot = (data.get("lot") or "").strip() or None
-    if shed and len(shed) > 50:
-        return jsonify({"error": "Tên chuồng quá dài."}), 400
-    if lot and len(lot) > 50:
-        return jsonify({"error": "Tên lô quá dài."}), 400
-
     try:
         farm_id = int(data.get("farm_id"))
     except (TypeError, ValueError):
@@ -250,29 +183,6 @@ def api_plans_create():
     farm_ids = allowed_farm_ids(session["user"])
     if farm_ids is not None and farm_id not in farm_ids:
         return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
-    try:
-        zone_id = int(data.get("zone_id"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Vui lòng chọn khu."}), 400
-    try:
-        pig_type_id = int(data.get("pig_type_id"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Vui lòng chọn loại heo bán."}), 400
-    if not any(pt["id"] == pig_type_id for pt in list_pig_types_locked(active_only=True)):
-        return jsonify({"error": "Loại heo không hợp lệ hoặc đã ngừng dùng."}), 400
-    try:
-        date.fromisoformat(planned_date)
-    except (TypeError, ValueError):
-        return jsonify({"error": "Ngày dự kiến không hợp lệ."}), 400
-    try:
-        quantity = int(data.get("quantity"))
-        if quantity <= 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        return jsonify({"error": "Số lượng không hợp lệ."}), 400
-    expected_avg_weight_kg, err = _parse_expected_avg_weight(data)
-    if err:
-        return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
     # Tạo kế hoạch + ghi audit trong CÙNG 1 transaction (STEP 2 Service
@@ -280,22 +190,10 @@ def api_plans_create():
     # PIG_PRICE_ENTERPRISE_REFACTOR_CONTEXT.md) — trước đây 2 bước này tách
     # rời (create_plan_locked rồi log_audit riêng), nếu bước audit lỗi thì
     # kế hoạch đã tạo nhưng mất vết audit.
-    plan_id = plan_service.create_plan(
-        {
-            "planned_date": planned_date,
-            "farm_id": farm_id,
-            "zone_id": zone_id,
-            "shed": shed,
-            "lot": lot,
-            "pig_type_id": pig_type_id,
-            "quantity": quantity,
-            "expected_avg_weight_kg": expected_avg_weight_kg,
-            "note": note,
-        },
-        DB_PATH,
-        ip=request.remote_addr,
-        username=username,
-    )
+    try:
+        plan_id = plan_service.create_plan(data, DB_PATH, ip=request.remote_addr, username=username)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     df = load_df()
     nat = national_price(df)
     plan = get_plan_locked(plan_id)
@@ -412,64 +310,20 @@ def api_plans_edit(plan_id: int):
         return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     data = request.get_json(silent=True) or {}
-    planned_date = data.get("planned_date", "")
-    note = (data.get("note") or "").strip() or None
-    shed = (data.get("shed") or "").strip() or None
-    lot = (data.get("lot") or "").strip() or None
-    if shed and len(shed) > 50:
-        return jsonify({"error": "Tên chuồng quá dài."}), 400
-    if lot and len(lot) > 50:
-        return jsonify({"error": "Tên lô quá dài."}), 400
-
+    # farm_id mới (có thể khác old_plan["farm_id"] nếu đổi trại) cũng phải
+    # nằm trong farm-scope — validate định dạng/giá trị còn lại đã chuyển
+    # vào plan_service._validate_plan_fields() (STEP 7 Route Refactor).
     try:
-        farm_id = int(data.get("farm_id"))
+        new_farm_id = int(data.get("farm_id"))
     except (TypeError, ValueError):
         return jsonify({"error": "Vui lòng chọn trang trại."}), 400
-    if farm_ids is not None and farm_id not in farm_ids:
+    if farm_ids is not None and new_farm_id not in farm_ids:
         return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
-    try:
-        zone_id = int(data.get("zone_id"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Vui lòng chọn khu."}), 400
-    try:
-        pig_type_id = int(data.get("pig_type_id"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Vui lòng chọn loại heo bán."}), 400
-    if not any(pt["id"] == pig_type_id for pt in list_pig_types_locked(active_only=True)):
-        return jsonify({"error": "Loại heo không hợp lệ hoặc đã ngừng dùng."}), 400
-    try:
-        date.fromisoformat(planned_date)
-    except (TypeError, ValueError):
-        return jsonify({"error": "Ngày dự kiến không hợp lệ."}), 400
-    try:
-        quantity = int(data.get("quantity"))
-        if quantity <= 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        return jsonify({"error": "Số lượng không hợp lệ."}), 400
-    expected_avg_weight_kg, err = _parse_expected_avg_weight(data)
-    if err:
-        return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
     try:
         updated = plan_service.edit_plan(
-            plan_id,
-            {
-                "planned_date": planned_date,
-                "farm_id": farm_id,
-                "zone_id": zone_id,
-                "shed": shed,
-                "lot": lot,
-                "pig_type_id": pig_type_id,
-                "quantity": quantity,
-                "expected_avg_weight_kg": expected_avg_weight_kg,
-                "note": note,
-            },
-            old_plan,
-            DB_PATH,
-            ip=request.remote_addr,
-            username=username,
+            plan_id, data, old_plan, DB_PATH, ip=request.remote_addr, username=username
         )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -772,16 +626,18 @@ def api_orders_list():
 @plans_bp.route("/api/orders", methods=["POST"])
 @permission_required(perm.PLAN_ALLOCATION_CREATE)
 def api_orders_create():
+    """STEP 7 (Route Refactor): validate dòng hàng đã chuyển vào
+    order_service._validate_lines() (dùng chung với api_order_add_line())."""
     data = request.get_json(silent=True) or {}
     raw_lines = data.get("lines")
     if not isinstance(raw_lines, list) or not raw_lines:
         return jsonify({"error": "Vui lòng thêm ít nhất 1 dòng heo vào đơn."}), 400
-    validated, err = _validate_order_lines(raw_lines)
-    if err:
-        return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
-    order_id = order_service.create_order(validated, DB_PATH, ip=request.remote_addr, username=username)
+    try:
+        order_id = order_service.create_order(raw_lines, DB_PATH, ip=request.remote_addr, username=username)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     df = load_df()
     nat = national_price(df)
     order = get_order_locked(order_id)
@@ -797,12 +653,12 @@ def api_order_add_line(order_id: int):
     if order["status"] != "active":
         return jsonify({"error": "Chỉ thêm dòng vào đơn đang xử lý."}), 400
     data = request.get_json(silent=True) or {}
-    validated, err = _validate_order_lines([data])
-    if err:
-        return jsonify({"error": err}), 400
 
     username = session["user"]["username"]
-    line_id = order_service.add_line(order_id, validated[0], DB_PATH, ip=request.remote_addr, username=username)
+    try:
+        line_id = order_service.add_line(order_id, data, DB_PATH, ip=request.remote_addr, username=username)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     df = load_df()
     nat = national_price(df)
     order = get_order_locked(order_id)

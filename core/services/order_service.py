@@ -4,22 +4,74 @@ audit log vào chung 1 transaction qua core.db.run_in_transaction(), thay cho
 pattern cũ (data_access.*_locked() rồi log_audit() tách rời, không atomic)."""
 from pathlib import Path
 
-from core.db import run_in_transaction
-from core.repositories import audit_repo, sale_orders_repo
+from core.db import db_lock, run_in_transaction
+from core.repositories import audit_repo, sale_orders_repo, sale_plans_repo
 from core.repositories import weighing_repo
 from core import audit_actions
 
 _write = run_in_transaction
 
 
+def _validate_lines(raw_lines: list, db_path: Path) -> list[dict]:
+    """STEP 7 (Route Refactor): chuyển nguyên logic validate 1 hoặc nhiều
+    dòng hàng cùng lúc — trước đây là _validate_order_lines() ở
+    webapp/routes/plans.py. Dùng cho cả tạo đơn mới lẫn thêm 1 dòng vào
+    đơn có sẵn. Cộng dồn số lượng đã "đặt chỗ" trong CHÍNH lần gọi này
+    theo từng sale_plan_id — phòng trường hợp cùng 1 kế hoạch trại xuất
+    hiện ở nhiều dòng trong 1 lần gửi, vượt quá remaining_quantity dù mỗi
+    dòng riêng lẻ có vẻ hợp lệ. Raise ValueError(msg) thay vì trả
+    (None, msg) như hàm gốc — route bắt bằng try/except ValueError."""
+    validated: list[dict] = []
+    reserved_by_plan: dict[int, int] = {}
+    plan_cache: dict[int, dict] = {}
+    for raw in raw_lines:
+        if not isinstance(raw, dict):
+            raise ValueError("Dữ liệu dòng hàng không hợp lệ.")
+        try:
+            sale_plan_id = int(raw.get("sale_plan_id"))
+        except (TypeError, ValueError):
+            raise ValueError("Vui lòng chọn kế hoạch trại cho từng dòng.")
+        plan = plan_cache.get(sale_plan_id)
+        if plan is None:
+            with db_lock:
+                plan = sale_plans_repo.get_sale_plan(sale_plan_id, db_path)
+            if plan is None:
+                raise ValueError("Không tìm thấy kế hoạch trại.")
+            if plan["status"] != "approved":
+                raise ValueError("Chỉ tạo dòng hàng từ kế hoạch trại đã duyệt.")
+            plan_cache[sale_plan_id] = plan
+        try:
+            quantity = int(raw.get("quantity"))
+            if quantity <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("Số lượng không hợp lệ.")
+        reserved_by_plan[sale_plan_id] = reserved_by_plan.get(sale_plan_id, 0) + quantity
+        if reserved_by_plan[sale_plan_id] > plan["remaining_quantity"]:
+            raise ValueError(f"Vượt quá số lượng còn lại của {plan['plan_code']} ({plan['remaining_quantity']} con).")
+        try:
+            selling_price = int(raw.get("selling_price"))
+            if selling_price <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("Vui lòng nhập giá chào bán hợp lệ.")
+        note = (raw.get("note") or "").strip() or None
+        validated.append(
+            {"sale_plan_id": sale_plan_id, "quantity": quantity, "selling_price": selling_price, "note": note}
+        )
+    return validated
+
+
 def create_order(
-    lines: list[dict],
+    raw_lines: list,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> int:
-    """Tạo đơn hàng (kèm N dòng ban đầu) + audit trong cùng transaction."""
+    """Validate input thô (STEP 7 Route Refactor) rồi tạo đơn hàng (kèm N
+    dòng ban đầu) + audit trong cùng transaction. Có thể raise ValueError."""
+    lines = _validate_lines(raw_lines, db_path)
 
     def _do(conn):
         order_id = sale_orders_repo.create_order(lines, db_path, ip, username, conn=conn)
@@ -40,13 +92,16 @@ def create_order(
 
 def add_line(
     order_id: int,
-    line: dict,
+    raw_line: dict,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> int:
-    """Thêm 1 dòng vào đơn đang xử lý + audit cùng transaction."""
+    """Validate input thô (STEP 7 Route Refactor, dùng chung
+    _validate_lines() với create_order()) rồi thêm 1 dòng vào đơn đang xử
+    lý + audit cùng transaction. Có thể raise ValueError."""
+    line = _validate_lines([raw_line], db_path)[0]
 
     def _do(conn):
         line_id = sale_orders_repo.add_order_line(order_id, line, db_path, ip, username, conn=conn)

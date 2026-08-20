@@ -1,7 +1,8 @@
+from datetime import date
 from pathlib import Path
 
-from core.db import run_in_transaction
-from core.repositories import audit_repo, plan_reconciliation_repo, sale_plans_repo
+from core.db import db_lock, run_in_transaction
+from core.repositories import audit_repo, pig_types_repo, plan_reconciliation_repo, sale_plans_repo
 from core import audit_actions
 
 # Alias nội bộ — giữ tên `_write` cũ trong toàn bộ file này để không phải
@@ -10,14 +11,94 @@ from core import audit_actions
 _write = run_in_transaction
 
 
+def _parse_expected_avg_weight(data: dict) -> float | None:
+    """Trọng lượng dự kiến (kg/con) — tuỳ chọn. Rỗng/thiếu -> None (không
+    phải 0), để phân biệt "chưa nhập cân" với "cân bằng 0" (xem
+    _PLANNED_WEIGHT_SQL ở sale_plans_repo.py). Raise ValueError nếu có
+    nhập nhưng không hợp lệ."""
+    raw = data.get("expected_avg_weight_kg")
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Trọng lượng dự kiến không hợp lệ.")
+    if value <= 0:
+        raise ValueError("Trọng lượng dự kiến phải lớn hơn 0.")
+    return value
+
+
+def _validate_plan_fields(data: dict, db_path: Path) -> dict:
+    """STEP 7 (Route Refactor): validate + parse toàn bộ trường của kế
+    hoạch trại — gộp đúng 2 khối validate trước đây bị copy-paste giống
+    hệt nhau ở webapp/routes/plans.py (api_plans_create + api_plans_edit)
+    thành 1 chỗ. Raise ValueError(msg) đúng message cũ cho từng trường
+    hợp lỗi — route bắt bằng try/except ValueError -> 400, khớp khuôn đã
+    dùng sẵn ở edit_plan()/sale_plans_repo.update_sale_plan_edit()."""
+    note = (data.get("note") or "").strip() or None
+    shed = (data.get("shed") or "").strip() or None
+    lot = (data.get("lot") or "").strip() or None
+    if shed and len(shed) > 50:
+        raise ValueError("Tên chuồng quá dài.")
+    if lot and len(lot) > 50:
+        raise ValueError("Tên lô quá dài.")
+
+    try:
+        farm_id = int(data.get("farm_id"))
+    except (TypeError, ValueError):
+        raise ValueError("Vui lòng chọn trang trại.")
+    try:
+        zone_id = int(data.get("zone_id"))
+    except (TypeError, ValueError):
+        raise ValueError("Vui lòng chọn khu.")
+    try:
+        pig_type_id = int(data.get("pig_type_id"))
+    except (TypeError, ValueError):
+        raise ValueError("Vui lòng chọn loại heo bán.")
+    with db_lock:
+        active_pig_types = pig_types_repo.list_pig_types(db_path, active_only=True)
+    if not any(pt["id"] == pig_type_id for pt in active_pig_types):
+        raise ValueError("Loại heo không hợp lệ hoặc đã ngừng dùng.")
+
+    planned_date = data.get("planned_date", "")
+    try:
+        date.fromisoformat(planned_date)
+    except (TypeError, ValueError):
+        raise ValueError("Ngày dự kiến không hợp lệ.")
+
+    try:
+        quantity = int(data.get("quantity"))
+        if quantity <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError("Số lượng không hợp lệ.")
+
+    expected_avg_weight_kg = _parse_expected_avg_weight(data)
+
+    return {
+        "planned_date": planned_date,
+        "farm_id": farm_id,
+        "zone_id": zone_id,
+        "shed": shed,
+        "lot": lot,
+        "pig_type_id": pig_type_id,
+        "quantity": quantity,
+        "expected_avg_weight_kg": expected_avg_weight_kg,
+        "note": note,
+    }
+
+
 def create_plan(
-    plan: dict,
+    data: dict,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> int:
-    """Tạo kế hoạch trại và audit trong cùng transaction."""
+    """Validate input thô (route chỉ còn lo HTTP + farm-scope check —
+    STEP 7 Route Refactor) rồi tạo kế hoạch trại + audit trong cùng
+    transaction. Có thể raise ValueError (route bắt -> 400)."""
+    plan = _validate_plan_fields(data, db_path)
 
     def _do(conn):
         plan_id = sale_plans_repo.create_sale_plan(plan, db_path, ip, username, conn=conn)
@@ -164,18 +245,21 @@ def record_received(
 
 def edit_plan(
     plan_id: int,
-    plan: dict,
+    data: dict,
     old_plan: dict,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> bool:
-    """Sửa nội dung kế hoạch trại + audit cùng transaction. Có thể raise
-    ValueError (chặn sửa quantity khi đã có đơn/đối soát tham chiếu — xem
-    sale_plans_repo.update_sale_plan_edit) — transaction() tự rollback khi
-    exception, route bắt ValueError y hệt trước đây. Trả False (không audit)
-    nếu kế hoạch không còn tồn tại, khớp hành vi cũ của route."""
+    """Validate input thô (STEP 7 Route Refactor, dùng chung
+    _validate_plan_fields() với create_plan()) rồi sửa nội dung kế hoạch
+    trại + audit cùng transaction. Có thể raise ValueError — hoặc từ
+    validate input, hoặc chặn sửa quantity khi đã có đơn/đối soát tham
+    chiếu (xem sale_plans_repo.update_sale_plan_edit) — route bắt
+    ValueError y hệt trước đây. Trả False (không audit) nếu kế hoạch
+    không còn tồn tại, khớp hành vi cũ của route."""
+    plan = _validate_plan_fields(data, db_path)
 
     def _do(conn):
         updated = sale_plans_repo.update_sale_plan_edit(plan_id, plan, db_path, ip, username, conn=conn)
