@@ -68,22 +68,44 @@ function dsBreakdownText(breakdown) {
   return breakdown.map((b) => `${RECONCILE_KIND_LABELS_DS[b.kind] || b.kind} ${b.quantity}`).join(", ");
 }
 
+// Cơ cấu loại heo + trọng lượng — 2 chiều đối soát đã tính sẵn ở backend
+// (sale_plans_repo.py: delivery_mix/off_type_quantity, planned_total_weight_kg/
+// actual_total_weight_kg) nhưng trước STEP đối soát đa chiều chỉ hiện ở
+// trang Kế hoạch (plan.js:planReconcileHtml) — tái dùng đúng text/điều
+// kiện ở đây, không tính lại.
+function dsExtraBadges(p) {
+  const parts = [];
+  if (p.delivery_mix && p.delivery_mix.has_composition_variance) {
+    parts.push(`<span class="badge badge-warning">Lệch cơ cấu: ${p.off_type_quantity} con khác loại</span>`);
+  }
+  const hasWeight =
+    (p.planned_total_weight_kg !== null && p.planned_total_weight_kg !== undefined) ||
+    (p.actual_total_weight_kg !== null && p.actual_total_weight_kg !== undefined);
+  if (hasWeight) {
+    parts.push(`<span class="badge">Khối lượng: ${fmtWeight(p.actual_total_weight_kg)} / ${fmtWeight(p.planned_total_weight_kg)} kg</span>`);
+  }
+  return parts.join(" ");
+}
+
 function planRowHtml(p) {
   const canAct = p.remaining_to_reconcile !== 0 && CAN_RECONCILE;
   const actionHtml = canAct
     ? `<a class="btn btn-ghost btn-sm" href="/ke-hoach?highlight=${p.id}&action=reconcile">Xử lý chênh lệch →</a>`
     : "";
   const remainingCls = p.remaining_to_reconcile < 0 ? "text-success" : p.remaining_to_reconcile > 0 ? "text-danger" : "";
+  const noteHtml = [dsBreakdownText(p.reconciliation_breakdown), dsExtraBadges(p)].filter(Boolean).join(" ");
   return `<tr>
     <td data-label="Mã kế hoạch">${p.plan_code || "#" + p.id}</td>
     <td data-label="Trại">${p.farm}${p.zone ? " · " + p.zone : ""}</td>
     <td data-label="Loại heo">${p.pig_type_name || "—"}</td>
     <td data-label="Ngày dự kiến">${fmtIsoDate(p.planned_date)}</td>
+    <td data-label="Ngày xuất thực tế">${p.last_delivered_date ? fmtIsoDate(p.last_delivered_date) : "—"}</td>
     <td data-label="Kế hoạch">${fmtPrice(p.quantity)} con</td>
-    <td data-label="Đã bán">${fmtPrice(p.actual_sold_quantity)} con</td>
-    <td data-label="Chưa xử lý" class="${remainingCls}">${fmtPrice(p.remaining_to_reconcile)} con</td>
+    <td data-label="Chốt">${fmtPrice(p.allocated_quantity)} con</td>
+    <td data-label="Thực tế">${fmtPrice(p.actual_sold_quantity)} con</td>
+    <td data-label="Chênh lệch" class="${remainingCls}">${fmtPrice(p.remaining_to_reconcile)} con</td>
     <td data-label="Trạng thái">${renderBadge(p.reconciliation_status)}</td>
-    <td data-label="Ghi chú">${dsBreakdownText(p.reconciliation_breakdown)}</td>
+    <td data-label="Ghi chú">${noteHtml}</td>
     <td>${actionHtml}</td>
   </tr>`;
 }
