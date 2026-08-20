@@ -1294,7 +1294,7 @@ app có cả truy cập LAN trực tiếp (HTTP) lẫn qua Cloudflare Tunnel
   session timeout (quyết định UX, chưa hỏi); không migrate 66 `fetch()`
   sang dùng `core/api.js` (nằm ngoài phạm vi CSRF).
 
-### 9. STEP 6 (Automated Tests) + STEP 7 (Route Refactor, 2 domain mẫu) — 2026-08-19
+### 9. STEP 6 (Automated Tests) + STEP 7 (Route Refactor, toàn bộ domain) — 2026-08-19
 
 Theo mục 19 tài liệu refactor: "Mục tiêu là có regression protection
 trước khi refactor sâu" — làm STEP 6 trước, STEP 7 sau, đúng thứ tự.
@@ -1321,24 +1321,52 @@ gốc repo **đã xoá**, không còn tồn tại — đừng tin phần mô t�
   qua Flask — 0.29s cho 10 test, so với 6s cho 12 test integration qua
   Flask, minh chứng cụ thể giá trị của việc validate sống trong service).
 
-**STEP 7 — Route Refactor (2 domain mẫu: plan + order)**: theo kiến
-trúc mục tiêu ở mục II.7 (Route → Service → Repository), chuyển validate
-định dạng/giá trị input (KHÔNG chuyển farm-scope check hay
-`@permission_required` — nhất quán với STEP 3) từ route vào service:
+**STEP 7 — Route Refactor (toàn bộ domain ghi)**: theo kiến trúc mục
+tiêu ở mục II.7 (Route → Service → Repository), chuyển validate định
+dạng/giá trị input vào service cho **mọi** domain ghi trong app (bắt đầu
+2 domain mẫu plan+order, sau đó mở rộng hết phần còn lại trong cùng
+ngày). **Nguyên tắc phạm vi nhất quán xuyên suốt cả 2 đợt** — 3 loại
+check sau LUÔN giữ ở route layer, không di chuyển:
+1. **Farm-scope check** (`allowed_farm_ids`) — nhất quán với STEP 3.
+2. **Check tham chiếu sang domain khác khi xoá** (VD `count_orders_for_
+   customer_locked`, `count_plans_for_farm_locked`, `count_users_with_
+   role_locked`...) — route đã có sẵn logic này, đây là business rule
+   tham chiếu, không phải validate input thuần.
+3. **Bất biến bảo mật gắn với định danh/session** — tự xoá chính mình +
+   xoá admin cuối cùng (`user_service.delete_user`, dùng
+   `session["user"]["id"]`), role `admin` bất khả xâm phạm
+   (`role_service`), role hệ thống không xoá được.
+
+Việc **được** di chuyển vào service (parse định dạng, độ dài chuỗi,
+trùng mã/tên, ngày hợp lệ, tồn tại tham chiếu hợp lệ — VD `pig_type_id`
+có active không):
 - `plan_service.py`: `_validate_plan_fields(data, db_path)` — gộp đúng
   2 khối validate bị copy-paste giống hệt nhau ở `api_plans_create()` và
-  `api_plans_edit()` (`webapp/routes/plans.py`) thành 1 chỗ, raise
-  `ValueError(msg)` — dùng chung khuôn `edit_plan()` đã có sẵn từ trước
-  (route bắt bằng `try/except ValueError → 400`). `create_plan()`/
-  `edit_plan()` đổi contract: nhận `data` thô từ `request.get_json()`
-  thay vì dict đã parse sẵn.
+  `api_plans_edit()` thành 1 chỗ.
 - `order_service.py`: `_validate_lines(raw_lines, db_path)` — chuyển
-  nguyên `_validate_order_lines()` từ `plans.py` (đã xoá khỏi route),
-  đổi `get_plan_locked()` (wrapper route-layer) sang gọi thẳng
-  `sale_plans_repo.get_sale_plan()` (wrap `db_lock`).
-- Domain còn lại (`delivery`/`customer`/`user`/`farm`/`pig_type`/`role`)
-  **chưa đụng** — để đợt sau, đúng phạm vi "1-2 domain mẫu trước" đã
-  thống nhất.
+  nguyên `_validate_order_lines()` từ `plans.py`.
+- `delivery_service.py`: `_validate_delivery_fields(data, plan, db_path)`
+  — gồm cả check "vượt quá kế hoạch" (đọc `sum_delivered_for_plan`).
+  `create_delivery()` đổi contract: nhận `(allocation_id, plan,
+  order_code, data thô, ...)`, tự build `audit_new_value` bên trong.
+- `customer_service.py`: `_validate_customer_fields(data, *,
+  name_required_msg)` — 2 route gốc có 2 message lỗi "thiếu tên" khác
+  nhau, giữ qua tham số để không đổi hành vi.
+- `farm_service.py`: `_validate_farm_fields()`/`_validate_zone_fields()`.
+- `pig_type_service.py`: `_validate_pig_type_fields()`.
+- `role_service.py`: `_validate_role_fields()`/`_validate_permission_
+  keys()` (`ROLE_KEY_RE` chuyển từ `admin.py` sang đây).
+- `user_service.py`: `_validate_new_username()`/`_validate_password()`/
+  role hợp lệ (`update_role`)/farm_ids hợp lệ (`assign_farms`). Fallback
+  im lặng `role="sales"` khi thiếu/sai ở `create_user` **vẫn ở route**
+  (khác hẳn validate-raise, không phải lỗi cần báo).
+
+Tất cả route giờ theo đúng 1 khuôn: parse JSON tối thiểu (chỉ phần cần
+cho farm-scope/tham chiếu) → gọi service trong
+`try/except ValueError as e: return jsonify({"error": str(e)}), 400`.
+Verify: 22/22 test pytest PASS **không đổi 1 dòng nào trong `tests/`**
+qua cả 2 đợt refactor — xác nhận hành vi HTTP-facing (message lỗi,
+status code, audit trail) giữ nguyên tuyệt đối.
 
 ---
 
