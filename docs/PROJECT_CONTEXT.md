@@ -1368,6 +1368,76 @@ Verify: 22/22 test pytest PASS **không đổi 1 dòng nào trong `tests/`**
 qua cả 2 đợt refactor — xác nhận hành vi HTTP-facing (message lỗi,
 status code, audit trail) giữ nguyên tuyệt đối.
 
+### 10. STEP 8 — Enterprise UI, 6 phase (2026-08-20)
+
+Theo mục 14 tài liệu refactor (Navigation/Page Header/KPI/Filter/Table/
+Detail/Action Bar/Status/Exception/Mobile). Audit trước khi làm (qua
+Explore agent, đọc hết `webapp/templates/` + JS đi kèm) phát hiện app
+chia 2 nhóm rõ rệt: **Nhóm A** (`dashboard`/`plans`/`allocations`/
+`doi_soat`/`admin_audit`/`bao_cao`) đã có design system từ đợt UX brief
+cũ (`page-header`/`breadcrumb`/`badge`/`toast`/`confirmModal`); **Nhóm
+B** (`khach_hang`/`admin_farms`/`admin_pig_types`/`admin_users`/
+`admin_permissions`) hoàn toàn chưa đụng, còn dùng
+`alert()/confirm()/prompt()` thô.
+
+**Phase 1 — trang "Xuất giao" độc lập (mới)**: trước đây dữ liệu xuất
+giao chỉ lồng trong chi tiết đơn hàng. `sale_deliveries_repo.
+list_deliveries(db_path, farm_ids=None)` (JOIN thêm `sale_plans`+`farms`
+để lọc/hiển thị theo trại) + `GET /xuat-giao` + `GET /api/deliveries`
+(dùng lại `_VIEW_PLAN_PERMS` có sẵn, không tạo permission mới) +
+`xuat_giao.html`/`.js` (khuôn `doi_soat.js`: fetch 1 lần, filter
+client-side).
+
+**Phase 2 — trang "Cấu hình" placeholder (mới)**: `GET /admin/config`,
+`.empty-state`, chưa có nội dung thật — chỉ tạo khung để nav khớp tài
+liệu, gate bằng `ADMIN_PERMISSIONS_MANAGE` có sẵn.
+
+**Phase 3 — nav regroup**: `base.html`'s `<nav class="topbar-nav">` (1
+danh sách phẳng 13 mục) nhóm thành 4 khối VẬN HÀNH/DỮ LIỆU/BÁO CÁO/QUẢN
+TRỊ (thêm `.nav-group`/`.nav-group-title` vào `style.css`) — **dùng
+chung layout dọc có sẵn cho cả dropdown mobile lẫn sidebar cố định
+desktop** (app có layout sidebar-trái ở `@media min-width:1024px`,
+không phải topbar ngang cổ điển — cả 2 chế độ render CÙNG 1 `<nav>` nên
+không cần CSS riêng theo breakpoint). Giữ nguyên 100% logic
+`current_user_can(...)` gate từng mục, không đổi permission nào.
+
+**Phase 4 — redesign 5 trang Nhóm B**: áp `page-header`/`breadcrumb`/
+`admin-table-responsive`/`badge` (thay `.status-dot`). 7 `prompt()` sửa
+từng field của khách hàng (`khach_hang.js`, nặng nhất) gộp thành 1 modal
+multi-field `#cus-edit-modal` (khuôn `#sale-details-modal` ở
+`allocation.js`). Farm/zone/pig-type (1-2 field) dùng `promptModal()`
+tuần tự — đủ dùng, không cần modal riêng. Toàn bộ `confirm()`/`alert()`
+còn lại → `confirmModal()`/`showToast()`. `admin_users.js`: đổi vai trò
+qua `<select onchange>` giờ `confirmModal()` trước, revert bằng
+`select.dataset.previousValue` (khởi tạo lúc load trang) nếu huỷ — không
+cần `location.reload()` để revert như trước. `doi_soat.js`'s
+`dsStatusBadge()` (tự trùng `.badge-*` cục bộ) xoá, dùng chung
+`renderBadge()` — thêm 4 key `needs_reconciliation`/`in_progress`/
+`reconciled`/`over_delivered` vào `STATUS_CONFIG` (`core/status.js`).
+
+**Phase 5 — BỎ QUA, có lý do**: kế hoạch ban đầu định chuyển
+`plans.html`/`allocations.html` sang kebab-menu `.action-menu` (CSS có
+sẵn, chưa từng dùng thật). Kiểm tra lại `plan.js`/`allocation.js` thì cả
+2 **đã** dùng khuôn table-row + `detailModal()` (từ đợt redesign
+list-view TRƯỚC Enterprise Refactor) — click dòng mở modal, hành động
+hiện thành hàng nút phẳng NGAY TRONG modal, đã giải quyết đúng vấn đề
+"nhiều action" mà `.action-menu` định giải quyết, chỉ khác cách làm. 5
+trang Nhóm B chỉ 2-3 nút/dòng, không đủ "chật" để cần kebab. `.action-
+menu` CSS giữ nguyên làm hạ tầng sẵn có, chưa wiring JS vì chưa có nơi
+thật sự cần — tránh thêm abstraction không cần thiết.
+
+**Phase 6 — mobile responsiveness còn thiếu**: `dashboard.html`'s bảng
+theo ngày thêm `admin-table-responsive` (data-label đã có sẵn trong
+`dashboard.js`, chỉ thiếu 1 class). Ma trận quyền×role
+(`admin_permissions.html`) xác nhận qua Browser pane thật ở 375px — ĐÃ
+đúng từ trước nhờ `.admin-table-wrap { overflow-x: auto }` có sẵn, không
+cần sửa gì.
+
+Verify mỗi phase: qua Browser pane thật (không chỉ đọc code) — desktop
++ mobile (375px), console/network sạch lỗi, dữ liệu thật render đúng,
+modal mở/điền đúng giá trị, DB thật sạch sau khi verify. 22/22 test
+pytest PASS xuyên suốt cả 6 phase.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng
