@@ -102,9 +102,21 @@ h1, h2, h3 { font-weight: 700; }
   background: rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 0.35rem;
-  gap: 0.15rem;
+  gap: 0.5rem;
 }
 .nav-toggle-input:checked ~ .topbar-nav { display: flex; }
+/* Nhóm nav theo VẬN HÀNH/DỮ LIỆU/BÁO CÁO/QUẢN TRỊ (STEP 8 Enterprise UI)
+   — dùng chung layout dọc cho cả dropdown mobile lẫn sidebar desktop
+   (xem khối "Desktop sidebar" cuối file), chỉ thêm tiêu đề nhóm nhỏ. */
+.nav-group { display: flex; flex-direction: column; gap: 0.15rem; }
+.nav-group-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.55);
+  padding: 0.3rem 0.85rem 0.1rem;
+}
 .nav-link {
   color: rgba(255, 255, 255, 0.85);
   text-decoration: none;
