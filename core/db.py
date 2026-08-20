@@ -438,6 +438,23 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at);
 -- đây — cùng lý do với idx_zones_farm_id/idx_sale_plans_plan_code: trên DB
 -- nâng cấp từ bản cũ, executescript() này chạy trước _migrate() nên các cột
 -- đó có thể chưa tồn tại lúc CREATE INDEX chạy.
+
+-- Hộp thư Thông báo (Phase 5, brief nghiệp vụ) — khác audit_log (lịch sử
+-- MỌI hành động, không ai "đọc") và Cảnh báo/Cần xử lý (tính động lúc đọc,
+-- không lưu): đây là bản ghi PERSIST, nhắm tới 1 người dùng cụ thể
+-- (recipient_username, không phải role/farm — đơn giản hoá bằng cách
+-- resolve người nhận LÚC GHI, xem core/services/notification_service.py),
+-- có trạng thái đọc/chưa đọc riêng cho từng người.
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_username TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    link_url TEXT,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_username, is_read);
 """
 
 

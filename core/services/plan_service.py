@@ -2,8 +2,9 @@ from datetime import date
 from pathlib import Path
 
 from core.db import db_lock, run_in_transaction
-from core.repositories import audit_repo, pig_types_repo, plan_reconciliation_repo, sale_plans_repo
-from core import audit_actions
+from core.repositories import audit_repo, notifications_repo, pig_types_repo, plan_reconciliation_repo, sale_plans_repo
+from core import audit_actions, permissions as perm
+from core.services import notification_service
 
 # Alias nội bộ — giữ tên `_write` cũ trong toàn bộ file này để không phải
 # đổi lại mọi lời gọi bên dưới; helper thật giờ sống ở core/db.py để
@@ -122,6 +123,18 @@ def create_plan(
             },
             conn=conn,
         )
+        # Thông báo (Phase 5, brief nghiệp vụ): người có quyền duyệt cần biết
+        # ngay có kế hoạch mới chờ xử lý, không phải tự vào /ke-hoach kiểm tra.
+        notification_service.notify(
+            perm.PLAN_REVIEW,
+            "Kế hoạch trại mới chờ duyệt",
+            f"{plan['quantity']} con — chờ duyệt.",
+            f"/ke-hoach?highlight={plan_id}",
+            db_path,
+            farm_id=plan["farm_id"],
+            exclude_username=username,
+            conn=conn,
+        )
         return plan_id
 
     return _write(db_path, _do)
@@ -133,10 +146,13 @@ def approve_plan(
     *,
     ip: str | None = None,
     username: str | None = None,
+    created_by: str | None = None,
 ) -> None:
     """Duyệt kế hoạch đang chờ duyệt + audit trong cùng transaction. Route
     đã xác nhận plan.status == 'pending_approval' trước khi gọi (điều kiện
-    này lặp lại trong WHERE của approve_sale_plan làm lớp bảo vệ thứ 2)."""
+    này lặp lại trong WHERE của approve_sale_plan làm lớp bảo vệ thứ 2).
+    created_by: route đã fetch sẵn (old_plan["created_by"]) — dùng để báo
+    ngược cho người đã lập kế hoạch, không tự truy vấn lại trong service."""
 
     def _do(conn):
         sale_plans_repo.approve_sale_plan(plan_id, db_path, ip, username, conn=conn)
@@ -151,6 +167,10 @@ def approve_plan(
             new_value={"status": "approved", "approved_by": username},
             conn=conn,
         )
+        if created_by:
+            notifications_repo.create_notification(
+                created_by, "Kế hoạch trại đã được duyệt", None, f"/ke-hoach?highlight={plan_id}", db_path, conn=conn
+            )
 
     _write(db_path, _do)
 
@@ -162,8 +182,10 @@ def reject_plan(
     *,
     ip: str | None = None,
     username: str | None = None,
+    created_by: str | None = None,
 ) -> None:
-    """Từ chối kế hoạch đang chờ duyệt + audit trong cùng transaction."""
+    """Từ chối kế hoạch đang chờ duyệt + audit trong cùng transaction.
+    created_by: xem ghi chú ở approve_plan()."""
 
     def _do(conn):
         sale_plans_repo.reject_sale_plan(plan_id, reason, db_path, ip, username, conn=conn)
@@ -178,6 +200,10 @@ def reject_plan(
             new_value={"status": "rejected", "rejected_by": username, "rejected_reason": reason},
             conn=conn,
         )
+        if created_by:
+            notifications_repo.create_notification(
+                created_by, "Kế hoạch trại bị từ chối", reason, f"/ke-hoach?highlight={plan_id}", db_path, conn=conn
+            )
 
     _write(db_path, _do)
 

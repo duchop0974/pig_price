@@ -231,7 +231,9 @@ def api_plans_approve(plan_id: int):
         return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     username = session["user"]["username"]
-    plan_service.approve_plan(plan_id, DB_PATH, ip=request.remote_addr, username=username)
+    plan_service.approve_plan(
+        plan_id, DB_PATH, ip=request.remote_addr, username=username, created_by=old_plan.get("created_by")
+    )
     return jsonify({"ok": True})
 
 
@@ -252,7 +254,9 @@ def api_plans_reject(plan_id: int):
         return jsonify({"error": "Bạn không được gán quản lý trang trại này."}), 403
 
     username = session["user"]["username"]
-    plan_service.reject_plan(plan_id, reason, DB_PATH, ip=request.remote_addr, username=username)
+    plan_service.reject_plan(
+        plan_id, reason, DB_PATH, ip=request.remote_addr, username=username, created_by=old_plan.get("created_by")
+    )
     return jsonify({"ok": True})
 
 

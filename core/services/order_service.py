@@ -7,7 +7,8 @@ from pathlib import Path
 from core.db import db_lock, run_in_transaction
 from core.repositories import audit_repo, sale_orders_repo, sale_plans_repo
 from core.repositories import weighing_repo
-from core import audit_actions
+from core import audit_actions, permissions as perm
+from core.services import notification_service
 
 _write = run_in_transaction
 
@@ -302,6 +303,19 @@ def mark_done(
             entity_type="sale_order",
             entity_id=order_id,
             new_value={"lines": line_actuals},
+            conn=conn,
+        )
+        # Thông báo (Phase 5, brief nghiệp vụ): đơn vừa "Đã bán" cần kế toán
+        # ghi nhận doanh thu — không farm-scope (1 đơn có thể gồm nhiều
+        # dòng/nhiều trại khác nhau, xem list_awaiting_revenue_locked cùng
+        # lý do không lọc farm).
+        notification_service.notify(
+            perm.PLAN_REVENUE_DETAILS,
+            "Đơn hàng đã bán, chờ ghi nhận doanh thu",
+            f"Đơn #{order_id} vừa được đánh dấu Đã bán.",
+            f"/chot-ban?highlight={order_id}",
+            db_path,
+            exclude_username=username,
             conn=conn,
         )
 

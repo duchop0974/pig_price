@@ -6,6 +6,7 @@ from core.repositories import (
     farms_repo,
     incident_repo,
     media_repo,
+    notifications_repo,
     pig_types_repo,
     plan_reconciliation_repo,
     prices_repo,
@@ -600,3 +601,28 @@ def count_deliveries_for_pig_type_locked(pig_type_id: int) -> int:
 def lock_delivery_locked(delivery_id: int, ip: str | None, username: str | None) -> bool:
     with db_lock:
         return weighing_repo.lock_record("sale_deliveries", delivery_id, DB_PATH, ip, username)
+
+
+# ---------------------------------------------------------------------------
+# Hộp thư Thông báo (STEP 10.5 / Phase 5, brief nghiệp vụ)
+# ---------------------------------------------------------------------------
+
+
+def list_notifications_for_user_locked(username: str, limit: int = 50) -> list[dict]:
+    with db_lock:
+        return notifications_repo.list_for_user(username, DB_PATH, limit=limit)
+
+
+def count_unread_notifications_locked(username: str) -> int:
+    with db_lock:
+        return notifications_repo.count_unread(username, DB_PATH)
+
+
+def mark_notification_read_locked(notification_id: int, username: str) -> bool:
+    with db_lock:
+        return notifications_repo.mark_read(notification_id, username, DB_PATH)
+
+
+def mark_all_notifications_read_locked(username: str) -> None:
+    with db_lock:
+        notifications_repo.mark_all_read(username, DB_PATH)

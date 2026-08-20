@@ -6,7 +6,8 @@ from pathlib import Path
 
 from core.db import db_lock, run_in_transaction
 from core.repositories import audit_repo, pig_types_repo, sale_deliveries_repo
-from core import audit_actions
+from core import audit_actions, permissions as perm
+from core.services import notification_service
 
 _write = run_in_transaction
 
@@ -119,6 +120,20 @@ def create_delivery(
             },
             conn=conn,
         )
+        # Thông báo (Phase 5, brief nghiệp vụ): xuất giao thiếu cân là đúng
+        # tiêu chí Exception Center mục 3 (list_deliveries_missing_weight) —
+        # báo tức thời thay vì chỉ chờ người vào trang Cảnh báo.
+        if delivery["total_weight_kg"] is None:
+            notification_service.notify(
+                perm.DELIVERY_CREATE,
+                "Xuất giao thiếu trọng lượng cân",
+                f"{plan['plan_code']} · {order_code or ''} — chưa nhập trọng lượng cân thực tế.",
+                "/xuat-giao",
+                db_path,
+                farm_id=plan.get("farm_id"),
+                exclude_username=username,
+                conn=conn,
+            )
         return created
 
     return _write(db_path, _do)

@@ -131,6 +131,21 @@ h1, h2, h3 { font-weight: 700; }
 .nav-link:hover { background: rgba(255, 255, 255, 0.14); }
 .nav-link.is-active { background: #fff; color: var(--primary-dark); }
 .nav-link.nav-link-muted { opacity: 0.7; font-weight: 500; }
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  margin-left: 0.35rem;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
 
 .nav-toggle-input { display: none; }
 .nav-toggle-btn {
@@ -1429,6 +1444,8 @@ footer p { margin: 0.15rem 0; }
 .timeline-item-title { font-size: var(--text-sm); font-weight: 700; margin-top: 0.1rem; }
 .timeline-item-detail { font-size: var(--text-sm); color: var(--muted); margin-top: 0.1rem; }
 .timeline-item.is-danger .timeline-item-title { color: var(--danger); }
+.timeline-item.is-unread { background: var(--info-light); border-radius: var(--radius-sm); padding-left: var(--space-4); margin-left: calc(-1 * var(--space-2)); }
+.timeline-item.is-unread::before { background: var(--info); }
 
 /* Stepper (generic workflow stepper) */
 .stepper {

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Thông báo{% endblock %}
+{% block brand_title %}🔔 Thông báo{% endblock %}
+{% block brand_sub %}Sự kiện gửi trực tiếp cho bạn — khác Cảnh báo/Cần xử lý (tính chung, không riêng ai){% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Thông báo</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🔔 Thông báo</h1>
+    <p class="page-header-desc">Sự kiện gửi trực tiếp cho bạn</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="section-head">
+      <h2>Hộp thư</h2>
+      <button type="button" id="btn-mark-all-read" class="btn btn-ghost btn-sm">Đánh dấu tất cả đã đọc</button>
+    </div>
+    <div id="notification-list" class="timeline"></div>
+    <p id="notification-empty" class="msg hidden">Chưa có thông báo nào.</p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/thong_bao.js') }}"></script>
+{% endblock %}

@@ -15,6 +15,7 @@ from routes.auth import auth_bp
 from routes.dashboard import dashboard_bp
 from routes.deliveries import deliveries_bp
 from routes.incidents import incidents_bp
+from routes.notifications import notifications_bp
 from routes.plans import plans_bp
 from routes.prices import prices_bp
 
@@ -60,6 +61,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(incidents_bp)
     app.register_blueprint(deliveries_bp)
+    app.register_blueprint(notifications_bp)
 
     @app.errorhandler(sqlite3.IntegrityError)
     def handle_data_frozen(e):

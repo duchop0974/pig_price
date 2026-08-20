@@ -17,6 +17,7 @@ from core import audit_actions
 from core import permissions as perm
 from core.db import db_lock, run_in_transaction
 from core.repositories import audit_repo, roles_repo
+from core.services import notification_service
 
 _write = run_in_transaction
 
@@ -93,5 +94,21 @@ def update_permissions(
             new_value={"permission_keys": permission_keys},
             conn=conn,
         )
+        # Thông báo (Phase 5, brief nghiệp vụ): đúng tiêu chí Exception
+        # Center mục 4 (list_unexpected_farm_permissions) — báo tức thời
+        # ngay lúc admin lỡ cấp thêm quyền cho role 'farm', không chỉ chờ
+        # người vào trang Cảnh báo phát hiện.
+        if role_key == roles_repo._FARM_ROLE_KEY:
+            extra = sorted(k for k in permission_keys if k not in roles_repo._FARM_ROLE_EXPECTED_PERMISSIONS)
+            if extra:
+                notification_service.notify(
+                    perm.ADMIN_PERMISSIONS_MANAGE,
+                    "Vai trò 'farm' vừa được cấp quyền vượt phạm vi mặc định",
+                    ", ".join(perm.label(k) for k in extra),
+                    "/admin/permissions",
+                    db_path,
+                    exclude_username=username,
+                    conn=conn,
+                )
 
     _write(db_path, _do)
