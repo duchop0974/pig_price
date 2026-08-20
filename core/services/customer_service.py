@@ -9,15 +9,56 @@ from core import audit_actions
 _write = run_in_transaction
 
 
+def _validate_customer_fields(data: dict, *, name_required_msg: str) -> dict:
+    """STEP 7 (Route Refactor): validate + parse toàn bộ trường khách hàng
+    — gộp 2 khối validate giống hệt nhau ở api_customers_create() và
+    api_customers_update() (webapp/routes/plans.py) thành 1 chỗ. Message
+    lỗi "thiếu tên" khác nhau giữa 2 route gốc (tạo mới vs sửa) nên giữ
+    tham số riêng để không đổi hành vi. Raise ValueError(msg)."""
+    name = (data.get("name") or "").strip()
+    phone = (data.get("phone") or "").strip() or None
+    address = (data.get("address") or "").strip() or None
+    tax_code = (data.get("tax_code") or "").strip() or None
+    note = (data.get("note") or "").strip() or None
+    email = (data.get("email") or "").strip() or None
+    contact_person = (data.get("contact_person") or "").strip() or None
+    contact_title = (data.get("contact_title") or "").strip() or None
+
+    if not name or len(name) > 150:
+        raise ValueError(name_required_msg)
+    if phone and len(phone) > 30:
+        raise ValueError("Số điện thoại quá dài.")
+    if tax_code and len(tax_code) > 20:
+        raise ValueError("Mã số thuế quá dài.")
+    if email and (len(email) > 100 or "@" not in email):
+        raise ValueError("Email không hợp lệ.")
+    if contact_person and len(contact_person) > 100:
+        raise ValueError("Tên người liên hệ quá dài.")
+    if contact_title and len(contact_title) > 100:
+        raise ValueError("Chức vụ quá dài.")
+
+    return {
+        "name": name,
+        "phone": phone,
+        "address": address,
+        "tax_code": tax_code,
+        "note": note,
+        "email": email,
+        "contact_person": contact_person,
+        "contact_title": contact_title,
+    }
+
+
 def create_customer(
-    fields: dict,
+    data: dict,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> int:
-    """Tạo khách hàng + audit trong cùng transaction. `fields` gồm
-    name/phone/address/tax_code/note/email/contact_person/contact_title."""
+    """Validate input thô (STEP 7 Route Refactor) rồi tạo khách hàng +
+    audit trong cùng transaction. Có thể raise ValueError."""
+    fields = _validate_customer_fields(data, name_required_msg="Vui lòng nhập tên khách hàng hợp lệ.")
 
     def _do(conn):
         customer_id = customers_repo.create_customer(
@@ -55,14 +96,17 @@ def create_customer(
 
 def update_customer(
     customer_id: int,
-    fields: dict,
+    data: dict,
     old_customer: dict,
     db_path: Path,
     *,
     ip: str | None = None,
     username: str | None = None,
 ) -> None:
-    """Sửa khách hàng + audit trong cùng transaction."""
+    """Validate input thô (STEP 7 Route Refactor, dùng chung
+    _validate_customer_fields() với create_customer()) rồi sửa khách hàng
+    + audit trong cùng transaction. Có thể raise ValueError."""
+    fields = _validate_customer_fields(data, name_required_msg="Tên khách hàng không hợp lệ.")
 
     def _do(conn):
         customers_repo.update_customer(

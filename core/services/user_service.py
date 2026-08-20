@@ -2,17 +2,35 @@
 sang phần quản trị theo PIG_PRICE_ENTERPRISE_REFACTOR_CONTEXT.md. Mỗi hàm
 gộp đúng 1 lần ghi repo + 1 lần audit_log vào chung 1 transaction qua
 run_in_transaction, khớp khuôn đã dùng ở plan_service/order_service/
-delivery_service/customer_service. Validate nghiệp vụ (trùng username, tự
-xoá chính mình, xoá admin cuối cùng, role hợp lệ...) vẫn ở route layer —
-route đã có sẵn logic này và cần dữ liệu (list_roles_locked, session user)
-mà service không nắm."""
+delivery_service/customer_service.
+
+STEP 7 (Route Refactor): validate định dạng (username/password/farm_ids)
++ trùng username đã chuyển vào service. Tự xoá chính mình + xoá admin
+cuối cùng (delete_user) VẪN ở route layer — gắn với session["user"]["id"]
+(route/session concern), không phải validate input thuần, khớp nguyên
+tắc phạm vi đã dùng cho role_service (guard 'admin' bất khả xâm phạm).
+Resolve `role` mặc định "sales" khi không hợp lệ (create_user) vẫn ở
+route — đây là fallback im lặng, khác hẳn validate-raise nên không đưa
+vào service để giữ đúng hành vi cũ."""
 from pathlib import Path
 
 from core import audit_actions
-from core.db import run_in_transaction
-from core.repositories import audit_repo, users_repo
+from core.db import db_lock, run_in_transaction
+from core.repositories import audit_repo, farms_repo, roles_repo, users_repo
 
 _write = run_in_transaction
+
+
+def _validate_new_username(username: str, db_path: Path) -> None:
+    if not username or len(username) > 30:
+        raise ValueError("Tên đăng nhập không hợp lệ.")
+    if users_repo.get_user_by_username(username, db_path):
+        raise ValueError("Tên đăng nhập đã tồn tại.")
+
+
+def _validate_password(password: str) -> None:
+    if len(password) < 6:
+        raise ValueError("Mật khẩu cần tối thiểu 6 ký tự.")
 
 
 def create_user(
@@ -25,6 +43,9 @@ def create_user(
     ip=None,
     actor_username=None,
 ) -> int:
+    with db_lock:
+        _validate_new_username(username, db_path)
+    _validate_password(password)
     result = {}
 
     def _do(conn):
@@ -47,6 +68,11 @@ def create_user(
 
 
 def update_role(user_id: int, role: str, old_role: str, db_path: Path, *, ip=None, username=None) -> None:
+    with db_lock:
+        valid_role_keys = {r["key"] for r in roles_repo.list_roles(db_path)}
+    if role not in valid_role_keys:
+        raise ValueError("Vai trò không hợp lệ.")
+
     def _do(conn):
         users_repo.update_user_role(user_id, role, db_path, conn=conn)
         audit_repo.log_action(
@@ -64,7 +90,22 @@ def update_role(user_id: int, role: str, old_role: str, db_path: Path, *, ip=Non
     _write(db_path, _do)
 
 
-def assign_farms(user_id: int, farm_ids: list[int], old_farm_ids: list[int], db_path: Path, *, ip=None, username=None) -> None:
+def assign_farms(
+    user_id: int, raw_farm_ids, old_farm_ids: list[int], db_path: Path, *, ip=None, username=None
+) -> None:
+    """`raw_farm_ids` là input thô (list chưa chắc toàn int) — validate +
+    parse ở đây (STEP 7 Route Refactor), khớp message lỗi cũ của route."""
+    if not isinstance(raw_farm_ids, list):
+        raise ValueError("Danh sách trang trại không hợp lệ.")
+    try:
+        farm_ids = [int(fid) for fid in raw_farm_ids]
+    except (TypeError, ValueError):
+        raise ValueError("Danh sách trang trại không hợp lệ.")
+    with db_lock:
+        valid_ids = {f["id"] for f in farms_repo.list_farms(db_path)}
+    if any(fid not in valid_ids for fid in farm_ids):
+        raise ValueError("Có trang trại không tồn tại trong danh sách chọn.")
+
     def _do(conn):
         users_repo.assign_user_farms(user_id, farm_ids, db_path, conn=conn)
         audit_repo.log_action(
@@ -99,6 +140,8 @@ def set_active(user_id: int, is_active: bool, db_path: Path, *, ip=None, usernam
 
 
 def reset_password(user_id: int, new_password: str, db_path: Path, *, ip=None, username=None) -> None:
+    _validate_password(new_password)
+
     def _do(conn):
         users_repo.reset_password(user_id, new_password, db_path, conn=conn)
         audit_repo.log_action(

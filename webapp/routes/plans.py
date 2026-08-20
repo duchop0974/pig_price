@@ -487,44 +487,16 @@ def api_customers_list():
 @plans_bp.route("/api/customers", methods=["POST"])
 @permission_required(perm.CUSTOMER_MANAGE)
 def api_customers_create():
+    """STEP 7 (Route Refactor): validate đã chuyển vào
+    customer_service._validate_customer_fields() (dùng chung với
+    api_customers_update())."""
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    phone = (data.get("phone") or "").strip() or None
-    address = (data.get("address") or "").strip() or None
-    tax_code = (data.get("tax_code") or "").strip() or None
-    note = (data.get("note") or "").strip() or None
-    email = (data.get("email") or "").strip() or None
-    contact_person = (data.get("contact_person") or "").strip() or None
-    contact_title = (data.get("contact_title") or "").strip() or None
-
-    if not name or len(name) > 150:
-        return jsonify({"error": "Vui lòng nhập tên khách hàng hợp lệ."}), 400
-    if phone and len(phone) > 30:
-        return jsonify({"error": "Số điện thoại quá dài."}), 400
-    if tax_code and len(tax_code) > 20:
-        return jsonify({"error": "Mã số thuế quá dài."}), 400
-    if email and (len(email) > 100 or "@" not in email):
-        return jsonify({"error": "Email không hợp lệ."}), 400
-    if contact_person and len(contact_person) > 100:
-        return jsonify({"error": "Tên người liên hệ quá dài."}), 400
-    if contact_title and len(contact_title) > 100:
-        return jsonify({"error": "Chức vụ quá dài."}), 400
-
-    customer_service.create_customer(
-        {
-            "name": name,
-            "phone": phone,
-            "address": address,
-            "tax_code": tax_code,
-            "note": note,
-            "email": email,
-            "contact_person": contact_person,
-            "contact_title": contact_title,
-        },
-        DB_PATH,
-        ip=request.remote_addr,
-        username=session["user"]["username"],
-    )
+    try:
+        customer_service.create_customer(
+            data, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_customers_locked()), 201
 
 
@@ -535,45 +507,12 @@ def api_customers_update(customer_id: int):
     if old_customer is None:
         return jsonify({"error": "Không tìm thấy khách hàng."}), 404
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
-    phone = (data.get("phone") or "").strip() or None
-    address = (data.get("address") or "").strip() or None
-    tax_code = (data.get("tax_code") or "").strip() or None
-    note = (data.get("note") or "").strip() or None
-    email = (data.get("email") or "").strip() or None
-    contact_person = (data.get("contact_person") or "").strip() or None
-    contact_title = (data.get("contact_title") or "").strip() or None
-
-    if not name or len(name) > 150:
-        return jsonify({"error": "Tên khách hàng không hợp lệ."}), 400
-    if phone and len(phone) > 30:
-        return jsonify({"error": "Số điện thoại quá dài."}), 400
-    if tax_code and len(tax_code) > 20:
-        return jsonify({"error": "Mã số thuế quá dài."}), 400
-    if email and (len(email) > 100 or "@" not in email):
-        return jsonify({"error": "Email không hợp lệ."}), 400
-    if contact_person and len(contact_person) > 100:
-        return jsonify({"error": "Tên người liên hệ quá dài."}), 400
-    if contact_title and len(contact_title) > 100:
-        return jsonify({"error": "Chức vụ quá dài."}), 400
-
-    customer_service.update_customer(
-        customer_id,
-        {
-            "name": name,
-            "phone": phone,
-            "address": address,
-            "tax_code": tax_code,
-            "note": note,
-            "email": email,
-            "contact_person": contact_person,
-            "contact_title": contact_title,
-        },
-        old_customer,
-        DB_PATH,
-        ip=request.remote_addr,
-        username=session["user"]["username"],
-    )
+    try:
+        customer_service.update_customer(
+            customer_id, data, old_customer, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_customers_locked())
 
 

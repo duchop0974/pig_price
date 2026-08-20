@@ -1,7 +1,6 @@
 """Blueprint quản trị: tài khoản người dùng, danh mục (trang trại/khu, loại
 heo bán) + nhật ký hoạt động (chỉ admin)."""
 import json
-import re
 
 from flask import Blueprint, jsonify, render_template, request, session
 
@@ -31,8 +30,6 @@ from routes.auth import permission_required
 
 admin_bp = Blueprint("admin", __name__)
 
-ROLE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,29}$")
-
 
 @admin_bp.route("/admin/users", methods=["GET"])
 @permission_required(perm.ADMIN_USERS_MANAGE)
@@ -49,25 +46,24 @@ def api_admin_users_create():
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     display_name = (data.get("display_name") or "").strip() or username
+    # Fallback im lặng về "sales" khi role không hợp lệ/thiếu — khác hẳn
+    # validate-raise nên giữ ở route, không đưa vào service (xem docstring
+    # user_service.py).
     valid_role_keys = {r["key"] for r in list_roles_locked()}
     role = data.get("role") if data.get("role") in valid_role_keys else "sales"
 
-    if not username or len(username) > 30:
-        return jsonify({"error": "Tên đăng nhập không hợp lệ."}), 400
-    if len(password) < 6:
-        return jsonify({"error": "Mật khẩu cần tối thiểu 6 ký tự."}), 400
-    if users_repo.get_user_by_username(username, DB_PATH):
-        return jsonify({"error": "Tên đăng nhập đã tồn tại."}), 400
-
-    user_id = user_service.create_user(
-        username,
-        password,
-        display_name,
-        role,
-        DB_PATH,
-        ip=request.remote_addr,
-        actor_username=session["user"]["username"],
-    )
+    try:
+        user_service.create_user(
+            username,
+            password,
+            display_name,
+            role,
+            DB_PATH,
+            ip=request.remote_addr,
+            actor_username=session["user"]["username"],
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(users_repo.list_users(DB_PATH)), 201
 
 
@@ -76,16 +72,16 @@ def api_admin_users_create():
 def api_admin_users_update_role(user_id: int):
     data = request.get_json(silent=True) or {}
     role = data.get("role")
-    valid_role_keys = {r["key"] for r in list_roles_locked()}
-    if role not in valid_role_keys:
-        return jsonify({"error": "Vai trò không hợp lệ."}), 400
     users = users_repo.list_users(DB_PATH)
     old_user = next((u for u in users if u["id"] == user_id), None)
     if old_user is None:
         return jsonify({"error": "Không tìm thấy tài khoản."}), 404
-    user_service.update_role(
-        user_id, role, old_user["role"], DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        user_service.update_role(
+            user_id, role, old_user["role"], DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(users_repo.list_users(DB_PATH))
 
 
@@ -100,20 +96,13 @@ def api_admin_users_farms_get(user_id: int):
 def api_admin_users_farms_update(user_id: int):
     data = request.get_json(silent=True) or {}
     raw_ids = data.get("farm_ids")
-    if not isinstance(raw_ids, list):
-        return jsonify({"error": "Danh sách trang trại không hợp lệ."}), 400
-    try:
-        farm_ids = [int(fid) for fid in raw_ids]
-    except (TypeError, ValueError):
-        return jsonify({"error": "Danh sách trang trại không hợp lệ."}), 400
-    valid_ids = {f["id"] for f in list_farms_locked()}
-    if any(fid not in valid_ids for fid in farm_ids):
-        return jsonify({"error": "Có trang trại không tồn tại trong danh sách chọn."}), 400
-
     old_ids = [f["id"] for f in list_farms_for_user_locked(user_id)]
-    user_service.assign_farms(
-        user_id, farm_ids, old_ids, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        user_service.assign_farms(
+            user_id, raw_ids, old_ids, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_farms_for_user_locked(user_id))
 
 
@@ -133,11 +122,12 @@ def api_admin_users_toggle(user_id: int):
 def api_admin_users_reset_password(user_id: int):
     data = request.get_json(silent=True) or {}
     password = data.get("password") or ""
-    if len(password) < 6:
-        return jsonify({"error": "Mật khẩu cần tối thiểu 6 ký tự."}), 400
-    user_service.reset_password(
-        user_id, password, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        user_service.reset_password(
+            user_id, password, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
 
 
@@ -219,13 +209,12 @@ def api_admin_farms_create():
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip()
     province = (data.get("province") or "").strip() or None
-    if not code or len(code) > 30:
-        return jsonify({"error": "Vui lòng nhập mã trang trại hợp lệ."}), 400
-    if province and len(province) > 100:
-        return jsonify({"error": "Tên tỉnh quá dài."}), 400
-    if any(f["code"] == code for f in list_farms_locked()):
-        return jsonify({"error": "Mã trang trại đã tồn tại."}), 400
-    farm_service.create_farm(code, province, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    try:
+        farm_service.create_farm(
+            code, province, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_farms_locked()), 201
 
 
@@ -238,15 +227,12 @@ def api_admin_farms_update(farm_id: int):
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip()
     province = (data.get("province") or "").strip() or None
-    if not code or len(code) > 30:
-        return jsonify({"error": "Mã trang trại không hợp lệ."}), 400
-    if province and len(province) > 100:
-        return jsonify({"error": "Tên tỉnh quá dài."}), 400
-    if any(f["code"] == code and f["id"] != farm_id for f in list_farms_locked()):
-        return jsonify({"error": "Mã trang trại đã tồn tại."}), 400
-    farm_service.update_farm(
-        farm_id, code, province, old_farm, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        farm_service.update_farm(
+            farm_id, code, province, old_farm, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_farms_locked())
 
 
@@ -273,11 +259,10 @@ def api_admin_zones_create():
         return jsonify({"error": "Thiếu trang trại."}), 400
     if get_farm_locked(farm_id) is None:
         return jsonify({"error": "Không tìm thấy trang trại."}), 404
-    if not code or len(code) > 30:
-        return jsonify({"error": "Vui lòng nhập tên khu hợp lệ."}), 400
-    if any(z["code"] == code for z in list_zones_locked(farm_id)):
-        return jsonify({"error": "Tên khu đã tồn tại trong trang trại này."}), 400
-    farm_service.create_zone(farm_id, code, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    try:
+        farm_service.create_zone(farm_id, code, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_zones_locked(farm_id)), 201
 
 
@@ -289,11 +274,10 @@ def api_admin_zones_update(zone_id: int):
         return jsonify({"error": "Không tìm thấy khu."}), 404
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip()
-    if not code or len(code) > 30:
-        return jsonify({"error": "Tên khu không hợp lệ."}), 400
-    if any(z["code"] == code and z["id"] != zone_id for z in list_zones_locked(zone["farm_id"])):
-        return jsonify({"error": "Tên khu đã tồn tại trong trang trại này."}), 400
-    farm_service.update_zone(zone_id, code, zone, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    try:
+        farm_service.update_zone(zone_id, code, zone, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_zones_locked(zone["farm_id"]))
 
 
@@ -328,13 +312,12 @@ def api_admin_pig_types_create():
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip()
     name = (data.get("name") or "").strip()
-    if not code or len(code) > 30:
-        return jsonify({"error": "Mã loại heo không hợp lệ."}), 400
-    if not name or len(name) > 100:
-        return jsonify({"error": "Tên loại heo không hợp lệ."}), 400
-    if any(pt["code"] == code for pt in list_pig_types_locked()):
-        return jsonify({"error": "Mã loại heo đã tồn tại."}), 400
-    pig_type_service.create_pig_type(code, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    try:
+        pig_type_service.create_pig_type(
+            code, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_pig_types_locked()), 201
 
 
@@ -347,15 +330,12 @@ def api_admin_pig_types_update(pig_type_id: int):
     data = request.get_json(silent=True) or {}
     code = (data.get("code") or "").strip()
     name = (data.get("name") or "").strip()
-    if not code or len(code) > 30:
-        return jsonify({"error": "Mã loại heo không hợp lệ."}), 400
-    if not name or len(name) > 100:
-        return jsonify({"error": "Tên loại heo không hợp lệ."}), 400
-    if any(pt["code"] == code and pt["id"] != pig_type_id for pt in list_pig_types_locked()):
-        return jsonify({"error": "Mã loại heo đã tồn tại."}), 400
-    pig_type_service.update_pig_type(
-        pig_type_id, code, name, old_pig_type, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        pig_type_service.update_pig_type(
+            pig_type_id, code, name, old_pig_type, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(list_pig_types_locked())
 
 
@@ -430,13 +410,10 @@ def api_admin_roles_create():
     data = request.get_json(silent=True) or {}
     key = (data.get("key") or "").strip().lower()
     name = (data.get("name") or "").strip()
-    if not ROLE_KEY_RE.match(key):
-        return jsonify({"error": "Mã vai trò không hợp lệ (chỉ chữ thường/số/gạch dưới, bắt đầu bằng chữ, 2-30 ký tự)."}), 400
-    if not name or len(name) > 50:
-        return jsonify({"error": "Vui lòng nhập tên vai trò hợp lệ."}), 400
-    if get_role_locked(key) is not None:
-        return jsonify({"error": "Mã vai trò đã tồn tại."}), 400
-    role_service.create_role(key, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    try:
+        role_service.create_role(key, name, DB_PATH, ip=request.remote_addr, username=session["user"]["username"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(_role_permissions_matrix()), 201
 
 
@@ -464,10 +441,11 @@ def api_admin_roles_update_permissions(role_key: str):
         return jsonify({"error": "Không tìm thấy vai trò."}), 404
     data = request.get_json(silent=True) or {}
     raw_keys = data.get("permission_keys")
-    if not isinstance(raw_keys, list) or any(k not in perm.ALL_PERMISSION_KEYS for k in raw_keys):
-        return jsonify({"error": "Danh sách quyền không hợp lệ."}), 400
     old_keys = list_permissions_for_role_locked(role_key)
-    role_service.update_permissions(
-        role_key, raw_keys, old_keys, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
-    )
+    try:
+        role_service.update_permissions(
+            role_key, raw_keys, old_keys, DB_PATH, ip=request.remote_addr, username=session["user"]["username"]
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(_role_permissions_matrix())
