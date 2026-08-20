@@ -404,6 +404,14 @@ def admin_permissions_page():
     )
 
 
+@admin_bp.route("/admin/config", methods=["GET"])
+@permission_required(perm.ADMIN_PERMISSIONS_MANAGE)
+def admin_config_page():
+    """Placeholder rỗng (STEP 8 Enterprise UI) — khung trang cho mục
+    "Cấu hình" trong nav QUẢN TRỊ, chưa có nội dung thật."""
+    return render_template("admin_config.html")
+
+
 @admin_bp.route("/api/admin/roles", methods=["POST"])
 @permission_required(perm.ADMIN_PERMISSIONS_MANAGE)
 def api_admin_roles_create():
