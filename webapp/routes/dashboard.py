@@ -31,8 +31,8 @@ _VIEW_EXCEPTION_PERMS = (
 
 # Các bước của quy trình xuất bán, theo đúng thứ tự nghiệp vụ thực tế —
 # mỗi bước gắn với 1 permission key (gate hiển thị) và 1 endpoint trang đích.
-# Bước 1-3 nằm trên /ke-hoach (kế hoạch trại), bước 4-7 nằm trên /ke-hoach-ban
-# (kế hoạch bán) — 2 trang riêng từ GĐ6.
+# Bước 1-3 nằm trên /ke-hoach (kế hoạch trại), bước 4 trên /chao-hang, bước
+# 5-7 trên /chot-ban — tách từ /ke-hoach-ban cũ (Phase 4, brief nghiệp vụ).
 PROCESS_STEPS = [
     {
         "title": "1. Tạo kế hoạch trại",
@@ -56,32 +56,32 @@ PROCESS_STEPS = [
         "endpoint": "plans.plans_page",
     },
     {
-        "title": "4. Tạo kế hoạch bán",
+        "title": "4. Chào hàng",
         "desc": "Phòng bán hàng nhặt số lượng/loại heo từ kế hoạch trại đã duyệt, gán giá chào bán.",
         "icon": "🧾",
         "permission": perm.PLAN_ALLOCATION_CREATE,
-        "endpoint": "plans.allocations_page",
+        "endpoint": "plans.chao_hang_page",
     },
     {
         "title": "5. Chốt thông tin bán hàng",
         "desc": "Gán khách hàng, giá thoả thuận, thời gian & hình thức giao cho kế hoạch bán.",
         "icon": "🤝",
         "permission": perm.PLAN_SALE_DETAILS,
-        "endpoint": "plans.allocations_page",
+        "endpoint": "plans.chot_ban_page",
     },
     {
         "title": "6. Đánh dấu Đã bán",
         "desc": "Ghi nhận giá và số lượng bán thực tế khi hoàn tất xuất bán.",
         "icon": "🚚",
         "permission": perm.PLAN_ALLOCATION_MANAGE,
-        "endpoint": "plans.allocations_page",
+        "endpoint": "plans.chot_ban_page",
     },
     {
         "title": "7. Ghi nhận doanh thu & hoá đơn",
         "desc": "Kế toán ghi nhận số tiền đã thu, chứng từ cân, số hoá đơn.",
         "icon": "💰",
         "permission": perm.PLAN_REVENUE_DETAILS,
-        "endpoint": "plans.allocations_page",
+        "endpoint": "plans.chot_ban_page",
     },
     {
         "title": "8. Quản lý khách hàng",
@@ -146,11 +146,11 @@ def _build_exceptions(farm_ids: list[int] | None) -> list[dict]:
                     "icon": "🤝",
                     "text": f"{r['total']} đơn hàng chưa chốt bán hàng (chưa gán khách hàng)",
                     "entries": [
-                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        {"label": o["order_code"], "url": url_for("plans.chot_ban_page", highlight=o["id"])}
                         for o in r["items"]
                     ],
                     "total": r["total"],
-                    "more_url": url_for("plans.allocations_page"),
+                    "more_url": url_for("plans.chot_ban_page"),
                 }
             )
 
@@ -162,11 +162,11 @@ def _build_exceptions(farm_ids: list[int] | None) -> list[dict]:
                     "icon": "💰",
                     "text": f"{r['total']} đơn đã bán chưa ghi nhận doanh thu",
                     "entries": [
-                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        {"label": o["order_code"], "url": url_for("plans.chot_ban_page", highlight=o["id"])}
                         for o in r["items"]
                     ],
                     "total": r["total"],
-                    "more_url": url_for("plans.allocations_page"),
+                    "more_url": url_for("plans.chot_ban_page"),
                 }
             )
 
@@ -211,11 +211,11 @@ def _build_true_exceptions(farm_ids: list[int] | None) -> list[dict]:
                     "icon": "💰",
                     "text": f"{r['total']} đơn đã bán quá lâu (≥14 ngày) chưa ghi nhận doanh thu",
                     "entries": [
-                        {"label": o["order_code"], "url": url_for("plans.allocations_page", highlight=o["id"])}
+                        {"label": o["order_code"], "url": url_for("plans.chot_ban_page", highlight=o["id"])}
                         for o in r["items"]
                     ],
                     "total": r["total"],
-                    "more_url": url_for("plans.allocations_page"),
+                    "more_url": url_for("plans.chot_ban_page"),
                 }
             )
 

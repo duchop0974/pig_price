@@ -30,11 +30,14 @@
         {% endif %}
         <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
         <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch trại</a>
-        {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}
-        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}" href="{{ url_for('plans.allocations_page') }}">Kế hoạch bán</a>
+        {% if current_user_can('plans.allocation_create') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.chao_hang_page' else '' }}" href="{{ url_for('plans.chao_hang_page') }}">Chào hàng</a>
+        {% endif %}
+        {% if current_user_can('plans.sale_details') or current_user_can('plans.allocation_manage') or current_user_can('plans.revenue_details') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.chot_ban_page' else '' }}" href="{{ url_for('plans.chot_ban_page') }}">Chốt bán</a>
         {% endif %}
         {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.delivery_create') %}
-        <a class="nav-link {{ 'is-active' if request.endpoint == 'deliveries.xuat_giao_page' else '' }}" href="{{ url_for('deliveries.xuat_giao_page') }}">Xuất giao</a>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'deliveries.xuat_giao_page' else '' }}" href="{{ url_for('deliveries.xuat_giao_page') }}">Xuất thực tế</a>
         {% endif %}
         {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.reconcile_create') %}
         <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}" href="{{ url_for('plans.doi_soat_page') }}">Đối soát</a>
@@ -91,7 +94,7 @@
 <main>
 {% block breadcrumb %}{% endblock %}
 
-{% if request.endpoint in ['plans.plans_page', 'plans.allocations_page', 'plans.doi_soat_page'] %}
+{% if request.endpoint in ['plans.plans_page', 'plans.chao_hang_page', 'plans.chot_ban_page', 'deliveries.xuat_giao_page', 'plans.doi_soat_page'] %}
 <nav class="process-nav" aria-label="Điều hướng quy trình bán heo">
 
   <a class="process-nav-back"
@@ -109,17 +112,33 @@
 
   <span class="process-nav-arrow">→</span>
 
-  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}"
-     href="{{ url_for('plans.allocations_page') }}">
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.chao_hang_page' else '' }}"
+     href="{{ url_for('plans.chao_hang_page') }}">
     <span class="process-nav-number">2</span>
-    Bán & xuất
+    Chào hàng
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.chot_ban_page' else '' }}"
+     href="{{ url_for('plans.chot_ban_page') }}">
+    <span class="process-nav-number">3</span>
+    Chốt bán
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'deliveries.xuat_giao_page' else '' }}"
+     href="{{ url_for('deliveries.xuat_giao_page') }}">
+    <span class="process-nav-number">4</span>
+    Xuất thực tế
   </a>
 
   <span class="process-nav-arrow">→</span>
 
   <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}"
      href="{{ url_for('plans.doi_soat_page') }}">
-    <span class="process-nav-number">3</span>
+    <span class="process-nav-number">5</span>
     Đối soát
   </a>
 

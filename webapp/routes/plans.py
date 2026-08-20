@@ -3,7 +3,7 @@ from datetime import date, datetime
 from io import BytesIO
 
 import pandas as pd
-from flask import Blueprint, jsonify, render_template, request, send_file, session
+from flask import Blueprint, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from core import audit_actions
 from core import permissions as perm
@@ -125,7 +125,24 @@ def plans_page():
 
 @plans_bp.route("/ke-hoach-ban")
 def allocations_page():
-    return render_template("allocations.html")
+    """Trang cũ (gộp Chào hàng+Chốt bán) — Phase 4 (brief nghiệp vụ) đã
+    tách thành 2 trang riêng. Giữ redirect để bookmark/link cũ không vỡ."""
+    return redirect(url_for("plans.chot_ban_page"), code=303)
+
+
+@plans_bp.route("/chao-hang")
+def chao_hang_page():
+    """Chào bán: chọn nguồn heo từ kế hoạch trại đã duyệt, gán giá, xây
+    giỏ nháp rồi tạo đơn hàng mới (chưa cần khách hàng/xác nhận — đó là
+    bước Chốt bán)."""
+    return render_template("chao_hang.html")
+
+
+@plans_bp.route("/chot-ban")
+def chot_ban_page():
+    """Chốt bán: quản lý đơn hàng đã tồn tại — chốt thông tin bán hàng,
+    đánh dấu Đã bán, ghi nhận doanh thu, xuất giao/heo loại-hủy theo dòng."""
+    return render_template("chot_ban.html")
 
 
 @plans_bp.route("/api/farms", methods=["GET"])
