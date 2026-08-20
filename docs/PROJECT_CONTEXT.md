@@ -1294,6 +1294,52 @@ app có cả truy cập LAN trực tiếp (HTTP) lẫn qua Cloudflare Tunnel
   session timeout (quyết định UX, chưa hỏi); không migrate 66 `fetch()`
   sang dùng `core/api.js` (nằm ngoài phạm vi CSRF).
 
+### 9. STEP 6 (Automated Tests) + STEP 7 (Route Refactor, 2 domain mẫu) — 2026-08-19
+
+Theo mục 19 tài liệu refactor: "Mục tiêu là có regression protection
+trước khi refactor sâu" — làm STEP 6 trước, STEP 7 sau, đúng thứ tự.
+
+**STEP 6 — pytest thật trong `tests/`** (9 script `test_api_*_tmp.py` ở
+gốc repo **đã xoá**, không còn tồn tại — đừng tin phần mô tả 9 script đó
+ở mục 8 phía trên, nó chỉ đúng tại thời điểm viết STEP 5):
+- `tests/conftest.py` gộp khuôn lặp lại 9 lần thành fixture dùng chung:
+  `test_db`/`app`/`client`/`admin_client`/`ref_ids`/`db_connection`.
+  `audit_actions`/`login_as` là **fixture trả về closure** (không phải
+  hàm module-level) — tránh phải `import` xuyên `tests/integration/` →
+  `tests/security/` không ổn định dưới cơ chế rootless collection mặc
+  định của pytest (không có `__init__.py` trong `tests/`).
+- **Bẫy quan trọng**: `extensions.limiter` (STEP 5) là singleton cấp
+  module dùng chung mọi lần gọi `create_app()` trong CÙNG process —
+  pytest chạy nhiều test trong 1 process nên fixture `app` phải gọi
+  `extensions.limiter.reset()` mỗi lần, không thì rate-limit `/login`
+  cộng dồn qua các test khác nhau (IP giả `127.0.0.1` giống nhau ở mọi
+  test client), có thể làm 1 test đăng nhập bị `429` oan.
+- `tests/integration/` (8 file, migrate 1:1 từ 8 script cũ) +
+  `tests/security/test_farm_scope.py` (migrate từ
+  `test_api_farm_scope_tmp.py`) + `tests/services/test_plan_service.py`
+  (**mới**, unit test thật gọi thẳng `plan_service.create_plan()` không
+  qua Flask — 0.29s cho 10 test, so với 6s cho 12 test integration qua
+  Flask, minh chứng cụ thể giá trị của việc validate sống trong service).
+
+**STEP 7 — Route Refactor (2 domain mẫu: plan + order)**: theo kiến
+trúc mục tiêu ở mục II.7 (Route → Service → Repository), chuyển validate
+định dạng/giá trị input (KHÔNG chuyển farm-scope check hay
+`@permission_required` — nhất quán với STEP 3) từ route vào service:
+- `plan_service.py`: `_validate_plan_fields(data, db_path)` — gộp đúng
+  2 khối validate bị copy-paste giống hệt nhau ở `api_plans_create()` và
+  `api_plans_edit()` (`webapp/routes/plans.py`) thành 1 chỗ, raise
+  `ValueError(msg)` — dùng chung khuôn `edit_plan()` đã có sẵn từ trước
+  (route bắt bằng `try/except ValueError → 400`). `create_plan()`/
+  `edit_plan()` đổi contract: nhận `data` thô từ `request.get_json()`
+  thay vì dict đã parse sẵn.
+- `order_service.py`: `_validate_lines(raw_lines, db_path)` — chuyển
+  nguyên `_validate_order_lines()` từ `plans.py` (đã xoá khỏi route),
+  đổi `get_plan_locked()` (wrapper route-layer) sang gọi thẳng
+  `sale_plans_repo.get_sale_plan()` (wrap `db_lock`).
+- Domain còn lại (`delivery`/`customer`/`user`/`farm`/`pig_type`/`role`)
+  **chưa đụng** — để đợt sau, đúng phạm vi "1-2 domain mẫu trước" đã
+  thống nhất.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng
