@@ -3,6 +3,23 @@
 {% block brand_title %}👤 Quản lý tài khoản{% endblock %}
 {% block brand_sub %}Chỉ admin xem được trang này{% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Tài khoản</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">👤 Quản lý tài khoản</h1>
+    <p class="page-header-desc">Tạo/sửa tài khoản, gán vai trò và trang trại phụ trách</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   <section class="card">
     <h2>Tạo tài khoản mới</h2>
@@ -37,7 +54,7 @@
   <section class="card">
     <h2>Danh sách tài khoản</h2>
     <div class="admin-table-wrap">
-      <table class="admin-table">
+      <table class="admin-table admin-table-responsive">
         <thead>
           <tr>
             <th>Tên đăng nhập</th>
@@ -52,25 +69,25 @@
         <tbody id="user-list">
           {% for u in users %}
           <tr data-id="{{ u.id }}">
-            <td>{{ u.username }}</td>
-            <td>{{ u.display_name }}</td>
-            <td>
+            <td data-label="Tên đăng nhập">{{ u.username }}</td>
+            <td data-label="Tên hiển thị">{{ u.display_name }}</td>
+            <td data-label="Vai trò">
               <select class="role-select" data-id="{{ u.id }}">
                 {% for r in roles %}
                 <option value="{{ r.key }}" {{ 'selected' if u.role == r.key else '' }}>{{ r.name }}</option>
                 {% endfor %}
               </select>
             </td>
-            <td class="farms-cell" data-id="{{ u.id }}">
+            <td class="farms-cell" data-id="{{ u.id }}" data-label="Trại được gán">
               {% if u.role == 'farm' %}
               <span class="farms-list" data-id="{{ u.id }}">đang tải…</span>
               <button type="button" class="btn btn-ghost btn-sm btn-assign-farms" data-id="{{ u.id }}">Gán trại</button>
               {% else %}—{% endif %}
             </td>
-            <td>
-              <span class="status-dot {{ '' if u.is_active else 'inactive' }}">{{ 'Hoạt động' if u.is_active else 'Đã khoá' }}</span>
+            <td data-label="Trạng thái">
+              <span class="badge {{ 'badge-success' if u.is_active else '' }}">{{ 'Hoạt động' if u.is_active else 'Đã khoá' }}</span>
             </td>
-            <td>{{ u.created_at }}</td>
+            <td data-label="Tạo lúc">{{ u.created_at }}</td>
             <td>
               <button type="button" class="btn btn-ghost btn-sm btn-toggle" data-id="{{ u.id }}" data-active="{{ 1 if u.is_active else 0 }}">
                 {{ 'Khoá' if u.is_active else 'Mở lại' }}

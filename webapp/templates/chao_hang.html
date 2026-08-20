@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Chào hàng{% endblock %}
+{% block brand_title %}Chào hàng{% endblock %}
+{% block brand_sub %}Chọn nguồn heo từ kế hoạch trại đã duyệt, gán giá chào bán (BM02){% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Chào hàng</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">Chào hàng</h1>
+    <p class="page-header-desc">Chọn nguồn heo từ kế hoạch trại đã duyệt, gán giá chào bán (BM02)</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  {% if current_user_can('plans.allocation_create') %}
+
+  <section class="card">
+    <div class="section-head">
+      <h2>Tổng quan nguồn cung</h2>
+    </div>
+    <div id="supply-summary-cards" class="kpi-grid"></div>
+  </section>
+
+  <section class="card plan-list-section">
+    <div class="section-head">
+      <h2>Nguồn cung có thể bán</h2>
+    </div>
+    <div class="filter-bar">
+      <div class="control-row">
+        <select id="filter-farm"><option value="">Tất cả trại</option></select>
+        <select id="filter-pig-type"><option value="">Tất cả loại heo</option></select>
+        <input type="date" id="filter-date-from" title="Ngày dự kiến từ">
+        <input type="date" id="filter-date-to" title="Ngày dự kiến đến">
+        <select id="filter-status">
+          <option value="available">Có thể bán</option>
+          <option value="soldout">Đã bán hết</option>
+          <option value="all">Tất cả</option>
+        </select>
+        <input type="text" id="filter-search" placeholder="Tìm trại, mã kế hoạch, ghi chú...">
+      </div>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table admin-table-responsive">
+        <thead>
+          <tr>
+            <th>Trại</th>
+            <th>Loại heo</th>
+            <th>Kế hoạch</th>
+            <th>Ngày</th>
+            <th>Được duyệt</th>
+            <th>Đã phân bổ</th>
+            <th>Còn lại</th>
+            <th>Trạng thái</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="available-plans-list"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="line-section" class="card plan-section">
+    <h2>Thông tin bán</h2>
+    <p id="line-target-notice" class="msg hidden"></p>
+    <div id="selected-source-box" class="selected-source hidden">
+      <div class="selected-source-main">
+        <div class="selected-source-label">Đã chọn nguồn</div>
+        <div class="selected-source-code"></div>
+        <div class="selected-source-detail"></div>
+      </div>
+      <div class="selected-source-remaining">
+        <span class="selected-source-remaining-value"></span>
+        <span class="selected-source-remaining-unit">con còn lại</span>
+      </div>
+    </div>
+    <form id="line-form" class="plan-form">
+      <div class="control-row">
+        <label for="line-sale-plan">Nguồn heo</label>
+        <select id="line-sale-plan" required></select>
+      </div>
+      <div class="control-row">
+        <label for="line-quantity">Số lượng bán (con)</label>
+        <input type="number" id="line-quantity" min="1" step="1" placeholder="VD: 30" required>
+      </div>
+      <div class="control-row">
+        <label for="line-selling-price">Giá chào bán (đ/kg)</label>
+        <input type="text" inputmode="numeric" id="line-selling-price" placeholder="VD: 65.000" required>
+      </div>
+      <div class="control-row">
+        <label for="line-note">Ghi chú</label>
+        <input type="text" id="line-note" placeholder="Tùy chọn">
+      </div>
+      <p id="line-quantity-feedback" class="msg plan-form-feedback"></p>
+      <div class="control-row buttons">
+        <button type="submit" id="line-submit-btn" class="btn btn-primary">+ Thêm vào đơn</button>
+        <button type="button" id="line-cancel-target" class="btn btn-ghost hidden">Huỷ</button>
+      </div>
+      <p id="line-msg" class="msg"></p>
+    </form>
+  </section>
+
+  <section id="draft-cart-section" class="card plan-list-section">
+    <div class="section-head">
+      <h2>Đơn hàng đang tạo <span class="muted">— chưa lưu, thêm đủ dòng rồi bấm Tạo đơn hàng</span></h2>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table admin-table-responsive">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Trại</th>
+            <th>Loại heo</th>
+            <th>Kế hoạch</th>
+            <th>Số lượng</th>
+            <th>Giá</th>
+            <th>Ghi chú</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="draft-cart-list"></tbody>
+      </table>
+    </div>
+    <p id="draft-total" class="draft-total"></p>
+    <div class="control-row buttons">
+      <button type="button" id="btn-create-order" class="btn btn-primary btn-hero" disabled>Tạo đơn hàng</button>
+    </div>
+    <p id="draft-msg" class="msg"></p>
+  </section>
+
+  {% else %}
+  <section class="card">
+    <p class="msg">Bạn không có quyền chào hàng.</p>
+  </section>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.CURRENT_USER_PERMISSIONS = {{ current_user_permissions | tojson }};
+  window.CURRENT_USER_ROLE = "{{ current_user.role }}";
+</script>
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chao_hang.js') }}"></script>
+{% endblock %}

@@ -1,4 +1,5 @@
 """CRUD cho bảng farms/zones."""
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 
@@ -14,16 +15,25 @@ def list_farms(db_path: Path) -> list[dict]:
         conn.close()
 
 
-def create_farm(code: str, province: str | None, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def create_farm(
+    code: str, province: str | None, db_path: Path, conn: sqlite3.Connection | None = None
+) -> int:
+    """INSERT OR IGNORE — route đã kiểm tra trùng code trước khi gọi nên
+    thực tế luôn insert; lastrowid trả về đúng id bản ghi vừa tạo."""
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO farms (code, province, created_at) VALUES (?, ?, ?)",
             (code, province, datetime.now().isoformat(timespec="seconds")),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
+        return cur.lastrowid
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def list_zones(farm_id: int, db_path: Path) -> list[dict]:
@@ -37,16 +47,23 @@ def list_zones(farm_id: int, db_path: Path) -> list[dict]:
         conn.close()
 
 
-def create_zone(farm_id: int, code: str, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def create_zone(
+    farm_id: int, code: str, db_path: Path, conn: sqlite3.Connection | None = None
+) -> int:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO zones (farm_id, code, created_at) VALUES (?, ?, ?)",
             (farm_id, code, datetime.now().isoformat(timespec="seconds")),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
+        return cur.lastrowid
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_farm(farm_id: int, db_path: Path) -> dict | None:
@@ -60,29 +77,39 @@ def get_farm(farm_id: int, db_path: Path) -> dict | None:
         conn.close()
 
 
-def update_farm(farm_id: int, code: str, province: str | None, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def update_farm(
+    farm_id: int, code: str, province: str | None, db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE farms SET code = ?, province = ? WHERE id = ?", (code, province, farm_id)
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_farm(farm_id: int, db_path: Path) -> None:
+def delete_farm(farm_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
     """Xóa trang trại và toàn bộ khu thuộc trang trại đó. Gọi hàm này chỉ
     sau khi đã xác nhận (ở tầng route) không còn kế hoạch xuất bán nào tham
     chiếu farm_id — mọi kế hoạch đều gắn farm_id trực tiếp nên kiểm tra đó
     đã bao trùm luôn các khu con."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM zones WHERE farm_id = ?", (farm_id,))
         conn.execute("DELETE FROM farms WHERE id = ?", (farm_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_zone(zone_id: int, db_path: Path) -> dict | None:
@@ -96,19 +123,29 @@ def get_zone(zone_id: int, db_path: Path) -> dict | None:
         conn.close()
 
 
-def update_zone(zone_id: int, code: str, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def update_zone(
+    zone_id: int, code: str, db_path: Path, conn: sqlite3.Connection | None = None
+) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("UPDATE zones SET code = ? WHERE id = ?", (code, zone_id))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_zone(zone_id: int, db_path: Path) -> None:
-    conn = get_connection(db_path)
+def delete_zone(zone_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> None:
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute("DELETE FROM zones WHERE id = ?", (zone_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()

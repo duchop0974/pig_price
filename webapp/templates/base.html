@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>{% block title %}Quản lý bán heo{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 {% block extra_head %}{% endblock %}
@@ -21,40 +22,69 @@
     <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
     <label for="nav-toggle" class="nav-toggle-btn" aria-label="Menu">☰</label>
     <nav class="topbar-nav">
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.index' else '' }}" href="{{ url_for('dashboard.index') }}">Tổng quan</a>
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch trại</a>
-      {% if current_user_can('plans.allocation_create') or current_user_can('plans.sale_details') or current_user_can('plans.revenue_details') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}" href="{{ url_for('plans.allocations_page') }}">Kế hoạch bán</a>
+      <div class="nav-group">
+        <div class="nav-group-title">Vận hành</div>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.index' else '' }}" href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+        {% if current_user_can('plans.revenue_details') or current_user_can('plans.allocation_create') or current_user_can('plans.delivery_create') or current_user_can('admin.permissions.manage') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.canh_bao' else '' }}" href="{{ url_for('dashboard.canh_bao') }}">🚨 Cảnh báo</a>
+        {% endif %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'notifications.thong_bao_page' else '' }}" href="{{ url_for('notifications.thong_bao_page') }}">🔔 Thông báo<span id="nav-notification-badge" class="nav-badge hidden"></span></a>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'dashboard.quy_trinh' else '' }}" href="{{ url_for('dashboard.quy_trinh') }}">Quy trình xuất bán</a>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.plans_page' else '' }}" href="{{ url_for('plans.plans_page') }}">Kế hoạch trại</a>
+        {% if current_user_can('plans.allocation_create') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.chao_hang_page' else '' }}" href="{{ url_for('plans.chao_hang_page') }}">Chào hàng</a>
+        {% endif %}
+        {% if current_user_can('plans.sale_details') or current_user_can('plans.allocation_manage') or current_user_can('plans.revenue_details') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.chot_ban_page' else '' }}" href="{{ url_for('plans.chot_ban_page') }}">Chốt bán</a>
+        {% endif %}
+        {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.delivery_create') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'deliveries.xuat_giao_page' else '' }}" href="{{ url_for('deliveries.xuat_giao_page') }}">Xuất thực tế</a>
+        {% endif %}
+        {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.reconcile_create') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}" href="{{ url_for('plans.doi_soat_page') }}">Đối soát</a>
+        {% endif %}
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-title">Dữ liệu</div>
+        {% if current_user_can('customers.view') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.customers_page' else '' }}" href="{{ url_for('plans.customers_page') }}">Khách hàng</a>
+        {% endif %}
+        {% if current_user_can('admin.farms.view') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_farms_page' else '' }}" href="{{ url_for('admin.admin_farms_page') }}">Trang trại / Khu</a>
+        {% endif %}
+        {% if current_user_can('admin.pig_types.view') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_pig_types_page' else '' }}" href="{{ url_for('admin.admin_pig_types_page') }}">Danh mục heo</a>
+        {% endif %}
+        <a class="nav-link nav-link-muted {{ 'is-active' if request.endpoint == 'prices.price_page' else '' }}" href="{{ url_for('prices.price_page') }}">Giá heo tham khảo</a>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-title">Báo cáo</div>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.bao_cao_page' else '' }}" href="{{ url_for('plans.bao_cao_page') }}">Báo cáo</a>
+        {% if current_user_can('admin.audit.view') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_audit_page' else '' }}" href="{{ url_for('admin.admin_audit_page') }}">Nhật ký</a>
+        {% endif %}
+      </div>
+
+      {% if current_user_can('admin.users.manage') or current_user_can('admin.permissions.manage') %}
+      <div class="nav-group">
+        <div class="nav-group-title">Quản trị</div>
+        {% if current_user_can('admin.users.manage') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_users_page' else '' }}" href="{{ url_for('admin.admin_users_page') }}">Tài khoản</a>
+        {% endif %}
+        {% if current_user_can('admin.permissions.manage') %}
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_permissions_page' else '' }}" href="{{ url_for('admin.admin_permissions_page') }}">Phân quyền</a>
+        <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_config_page' else '' }}" href="{{ url_for('admin.admin_config_page') }}">Cấu hình</a>
+        {% endif %}
+      </div>
       {% endif %}
-      {% if current_user_can('plans.review') or current_user_can('plans.receive') or current_user_can('plans.edit') or current_user_can('plans.reconcile_create') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}" href="{{ url_for('plans.doi_soat_page') }}">Đối soát</a>
-      {% endif %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.bao_cao_page' else '' }}" href="{{ url_for('plans.bao_cao_page') }}">Báo cáo</a>
-      {% if current_user_can('customers.view') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'plans.customers_page' else '' }}" href="{{ url_for('plans.customers_page') }}">Khách hàng</a>
-      {% endif %}
-      {% if current_user_can('admin.farms.view') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_farms_page' else '' }}" href="{{ url_for('admin.admin_farms_page') }}">Trang trại / Khu</a>
-      {% endif %}
-      {% if current_user_can('admin.pig_types.view') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_pig_types_page' else '' }}" href="{{ url_for('admin.admin_pig_types_page') }}">Danh mục heo</a>
-      {% endif %}
-      {% if current_user_can('admin.users.manage') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_users_page' else '' }}" href="{{ url_for('admin.admin_users_page') }}">Tài khoản</a>
-      {% endif %}
-      {% if current_user_can('admin.permissions.manage') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_permissions_page' else '' }}" href="{{ url_for('admin.admin_permissions_page') }}">Phân quyền</a>
-      {% endif %}
-      {% if current_user_can('admin.audit.view') %}
-      <a class="nav-link {{ 'is-active' if request.endpoint == 'admin.admin_audit_page' else '' }}" href="{{ url_for('admin.admin_audit_page') }}">Nhật ký</a>
-      {% endif %}
-      <a class="nav-link nav-link-muted {{ 'is-active' if request.endpoint == 'prices.price_page' else '' }}" href="{{ url_for('prices.price_page') }}">Giá heo tham khảo</a>
     </nav>
     <div class="topbar-actions">
       {% block topbar_actions_extra %}{% endblock %}
       {% if current_user %}<span class="current-user">{{ current_user.display_name }}</span>{% endif %}
       <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-ghost btn-sm">Đăng xuất</button>
       </form>
     </div>
@@ -65,7 +95,7 @@
 <main>
 {% block breadcrumb %}{% endblock %}
 
-{% if request.endpoint in ['plans.plans_page', 'plans.allocations_page', 'plans.doi_soat_page'] %}
+{% if request.endpoint in ['plans.plans_page', 'plans.chao_hang_page', 'plans.chot_ban_page', 'deliveries.xuat_giao_page', 'plans.doi_soat_page'] %}
 <nav class="process-nav" aria-label="Điều hướng quy trình bán heo">
 
   <a class="process-nav-back"
@@ -83,17 +113,33 @@
 
   <span class="process-nav-arrow">→</span>
 
-  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.allocations_page' else '' }}"
-     href="{{ url_for('plans.allocations_page') }}">
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.chao_hang_page' else '' }}"
+     href="{{ url_for('plans.chao_hang_page') }}">
     <span class="process-nav-number">2</span>
-    Bán & xuất
+    Chào hàng
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.chot_ban_page' else '' }}"
+     href="{{ url_for('plans.chot_ban_page') }}">
+    <span class="process-nav-number">3</span>
+    Chốt bán
+  </a>
+
+  <span class="process-nav-arrow">→</span>
+
+  <a class="process-nav-step {{ 'is-active' if request.endpoint == 'deliveries.xuat_giao_page' else '' }}"
+     href="{{ url_for('deliveries.xuat_giao_page') }}">
+    <span class="process-nav-number">4</span>
+    Xuất thực tế
   </a>
 
   <span class="process-nav-arrow">→</span>
 
   <a class="process-nav-step {{ 'is-active' if request.endpoint == 'plans.doi_soat_page' else '' }}"
      href="{{ url_for('plans.doi_soat_page') }}">
-    <span class="process-nav-number">3</span>
+    <span class="process-nav-number">5</span>
     Đối soát
   </a>
 
@@ -114,10 +160,12 @@
   {% endblock %}
 </footer>
 
+<script src="{{ url_for('static', filename='js/core/csrf.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/toast.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/status.js') }}"></script>
 <script src="{{ url_for('static', filename='js/core/modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/core/notifications-badge.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -330,17 +330,49 @@ def _next_plan_code(conn: sqlite3.Connection, farm_id: int, planned_date: str) -
         seq += 1
 
 
-def create_sale_plan(plan: dict, db_path: Path, ip: str | None = None, username: str | None = None) -> int:
+def create_sale_plan(
+    plan: dict,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> int:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
+
     try:
-        plan_code = _next_plan_code(conn, plan["farm_id"], plan["planned_date"])
+        plan_code = _next_plan_code(
+            conn,
+            plan["farm_id"],
+            plan["planned_date"],
+        )
+
         cur = conn.execute(
             """
-            INSERT INTO sale_plans (plan_code, planned_date, farm_id, zone_id, shed, lot, pig_type_id, quantity,
-                                     expected_avg_weight_kg, note, status, created_at, created_ip, created_by,
-                                     updated_at, updated_ip, updated_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?)
+            INSERT INTO sale_plans (
+                plan_code,
+                planned_date,
+                farm_id,
+                zone_id,
+                shed,
+                lot,
+                pig_type_id,
+                quantity,
+                expected_avg_weight_kg,
+                note,
+                status,
+                created_at,
+                created_ip,
+                created_by,
+                updated_at,
+                updated_ip,
+                updated_by
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval',
+                    ?, ?, ?, ?, ?, ?)
             """,
             (
                 plan_code,
@@ -361,10 +393,15 @@ def create_sale_plan(plan: dict, db_path: Path, ip: str | None = None, username:
                 username,
             ),
         )
-        conn.commit()
+
+        if own_connection:
+            conn.commit()
+
         return cur.lastrowid
+
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def get_sale_plan(plan_id: int, db_path: Path) -> dict | None:
@@ -471,8 +508,11 @@ def update_sale_plan_status(
     db_path: Path,
     ip: str | None = None,
     username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -482,17 +522,27 @@ def update_sale_plan_status(
             """,
             (status, datetime.now().isoformat(timespec="seconds"), ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def approve_sale_plan(plan_id: int, db_path: Path, ip: str | None = None, username: str | None = None) -> None:
+def approve_sale_plan(
+    plan_id: int,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> None:
     """Duyệt kế hoạch đang chờ. Điều kiện status='pending_approval' trong
     WHERE là lớp bảo vệ thứ 2 (ngoài check ở route) chống duyệt trùng/duyệt
     sai trạng thái."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -503,16 +553,25 @@ def approve_sale_plan(plan_id: int, db_path: Path, ip: str | None = None, userna
             """,
             (username, now, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def reject_sale_plan(
-    plan_id: int, reason: str, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    reason: str,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -523,19 +582,28 @@ def reject_sale_plan(
             """,
             (username, now, reason, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_plan_received_quantity(
-    plan_id: int, received_quantity: int, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    received_quantity: int,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     """Trại tự ghi nhận số lượng thực tế đã xuất chuồng/bàn giao ra nhà chờ
     bán (BM01/QT001 bước B6). Ghi đè giá trị (không cộng dồn) — mỗi lần trại
     xuất chuồng thêm thì tự nhập lại tổng số mới."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             """
@@ -546,13 +614,20 @@ def update_plan_received_quantity(
             """,
             (received_quantity, now, username, now, ip, username, plan_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_sale_plan_edit(
-    plan_id: int, plan: dict, db_path: Path, ip: str | None = None, username: str | None = None
+    plan_id: int,
+    plan: dict,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Sửa lại nội dung kế hoạch trại (trường hợp nhập nhầm). Đây là quyền
     admin-only-by-default (perm.PLAN_EDIT, xem route) nên KHÔNG còn ràng buộc
@@ -570,7 +645,9 @@ def update_sale_plan_edit(
     chặn từ đầu bằng status/permission vì đây là 1 ràng buộc dữ liệu cụ thể,
     không phải quy tắc phân quyền."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         current = conn.execute("SELECT quantity FROM sale_plans WHERE id = ?", (plan_id,)).fetchone()
         if current is not None and plan["quantity"] != current[0]:
@@ -614,28 +691,34 @@ def update_sale_plan_edit(
                 plan_id,
             ),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_sale_plan(plan_id: int, db_path: Path) -> bool:
+def delete_sale_plan(plan_id: int, db_path: Path, conn: sqlite3.Connection | None = None) -> bool:
     """Xoá vĩnh viễn 1 kế hoạch trại — chặn nếu còn BẤT KỲ kế hoạch bán nào
     (dòng hàng) từng "nhặt" từ đó, kể cả đã huỷ/vô hiệu hoá (giữ lịch sử đối
     soát toàn vẹn). Không cascade tự động — admin phải tự xử lý/xoá các dòng
     hàng liên quan trước nếu thật sự cần xoá."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             "DELETE FROM sale_plans WHERE id = ? AND NOT EXISTS "
             "(SELECT 1 FROM sale_allocations WHERE sale_plan_id = sale_plans.id)",
             (plan_id,),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def count_plans_for_farm(farm_id: int, db_path: Path) -> int:
@@ -712,7 +795,13 @@ def _dashboard_date_range(days: int) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def dashboard_summary(db_path: Path, farm_ids: list[int] | None = None, days: int = 30) -> dict:
+def dashboard_summary(
+    db_path: Path,
+    farm_ids: list[int] | None = None,
+    days: int = 30,
+    customer_id: int | None = None,
+    pig_type_id: int | None = None,
+) -> dict:
     """5 KPI cho dashboard mới: kế hoạch/đã chốt/đã xuất thực tế/chưa xuất/
     sai lệch, theo số con, trong cửa sổ planned_date do _dashboard_date_range()
     quyết định (nhìn ngược `days` ngày + buffer tới gần cố định).
@@ -720,7 +809,15 @@ def dashboard_summary(db_path: Path, farm_ids: list[int] | None = None, days: in
     not_shipped_qty = allocated - actual (đã chốt vào đơn nhưng chưa giao
     thật — con số "còn phải làm"). variance_qty = actual - planned (ÂM
     nghĩa là xuất ít hơn kế hoạch, khớp cách đọc trực quan "-105 con" thay
-    vì phải tự suy ra dấu từ "kế hoạch trừ thực tế")."""
+    vì phải tự suy ra dấu từ "kế hoạch trừ thực tế").
+
+    customer_id: sale_plans KHÔNG có khái niệm khách hàng (1 kế hoạch có thể
+    tách nhiều khách) — filter này chỉ áp lên allocated_qty/actual_qty (qua
+    so.customer_id), planned_qty luôn không lọc theo khách hàng.
+    pig_type_id: planned_qty/allocated_qty lọc theo loại heo ĐĂNG KÝ của kế
+    hoạch (sp.pig_type_id), actual_qty lọc theo loại heo THỰC TẾ đã giao
+    (sd.pig_type_id, có thể khác — xem delivery_mix) — cố ý khác cột, đúng
+    khái niệm "cơ cấu lệch loại" app đã dùng ở nơi khác."""
     if farm_ids is not None and not farm_ids:
         return {
             "planned_qty": 0, "allocated_qty": 0, "actual_qty": 0,
@@ -733,18 +830,33 @@ def dashboard_summary(db_path: Path, farm_ids: list[int] | None = None, days: in
         if farm_ids is not None:
             farm_where = f" AND sp.farm_id IN ({', '.join('?' * len(farm_ids))})"
             farm_params = tuple(farm_ids)
+        customer_where, customer_params = "", ()
+        if customer_id is not None:
+            customer_where = " AND so.customer_id = ?"
+            customer_params = (customer_id,)
         start, end = _dashboard_date_range(days)
         date_where = f" AND sp.planned_date BETWEEN ? AND ?{farm_where}"
         date_params = (start, end, *farm_params)
 
+        planned_type_where, planned_type_params = "", ()
+        actual_type_where, actual_type_params = "", ()
+        if pig_type_id is not None:
+            planned_type_where = " AND sp.pig_type_id = ?"
+            planned_type_params = (pig_type_id,)
+            actual_type_where = " AND sd.pig_type_id = ?"
+            actual_type_params = (pig_type_id,)
+
         planned_qty = conn.execute(
-            f"SELECT COALESCE(SUM(sp.quantity), 0) FROM sale_plans sp WHERE 1=1{date_where}", date_params
+            f"SELECT COALESCE(SUM(sp.quantity), 0) FROM sale_plans sp WHERE 1=1{date_where}{planned_type_where}",
+            (*date_params, *planned_type_params),
         ).fetchone()[0]
         allocated_qty = conn.execute(
-            f"SELECT COALESCE(SUM(sa.quantity), 0) {_DASHBOARD_ALLOCATED_JOIN}{date_where}", date_params
+            f"SELECT COALESCE(SUM(sa.quantity), 0) {_DASHBOARD_ALLOCATED_JOIN}{date_where}{planned_type_where}{customer_where}",
+            (*date_params, *planned_type_params, *customer_params),
         ).fetchone()[0]
         actual_qty = conn.execute(
-            f"SELECT COALESCE(SUM(sd.quantity), 0) {_DASHBOARD_ACTUAL_JOIN}{date_where}", date_params
+            f"SELECT COALESCE(SUM(sd.quantity), 0) {_DASHBOARD_ACTUAL_JOIN}{date_where}{actual_type_where}{customer_where}",
+            (*date_params, *actual_type_params, *customer_params),
         ).fetchone()[0]
         not_shipped_qty = allocated_qty - actual_qty
         variance_qty = actual_qty - planned_qty
@@ -767,14 +879,24 @@ def dashboard_summary(db_path: Path, farm_ids: list[int] | None = None, days: in
         conn.close()
 
 
-def daily_reconciliation_series(db_path: Path, farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def daily_reconciliation_series(
+    db_path: Path,
+    farm_ids: list[int] | None = None,
+    days: int = 30,
+    customer_id: int | None = None,
+    pig_type_id: int | None = None,
+) -> list[dict]:
     """1 dòng/ngày trong cửa sổ planned_date của _dashboard_date_range()
     (nhìn ngược `days` ngày + buffer tới gần) — dùng chung cho CẢ bảng
     "Kế hoạch - Chốt - Xuất theo ngày" LẪN dữ liệu biểu đồ xu hướng, tránh
     2 query cho cùng 1 dữ liệu. Trả về ĐẦY ĐỦ mọi ngày trong khoảng kể cả
     ngày không có kế hoạch nào (toàn 0) — cần thiết cho trục thời gian
     liền mạch của biểu đồ; phía bảng (không cần liền mạch) tự lọc bớt
-    ngày toàn-0 ở tầng hiển thị."""
+    ngày toàn-0 ở tầng hiển thị.
+
+    customer_id/pig_type_id: cùng ngữ nghĩa như dashboard_summary() —
+    customer_id chỉ áp cho allocated/actual, pig_type_id áp sp.pig_type_id
+    (planned/allocated) và sd.pig_type_id (actual) riêng."""
     if farm_ids is not None and not farm_ids:
         return []
     conn = get_connection(db_path)
@@ -783,6 +905,17 @@ def daily_reconciliation_series(db_path: Path, farm_ids: list[int] | None = None
         if farm_ids is not None:
             farm_where = f" AND sp.farm_id IN ({', '.join('?' * len(farm_ids))})"
             farm_params = tuple(farm_ids)
+        customer_where, customer_params = "", ()
+        if customer_id is not None:
+            customer_where = " AND so.customer_id = ?"
+            customer_params = (customer_id,)
+        planned_type_where, planned_type_params = "", ()
+        actual_type_where, actual_type_params = "", ()
+        if pig_type_id is not None:
+            planned_type_where = " AND sp.pig_type_id = ?"
+            planned_type_params = (pig_type_id,)
+            actual_type_where = " AND sd.pig_type_id = ?"
+            actual_type_params = (pig_type_id,)
         start_iso, end_iso = _dashboard_date_range(days)
         start = datetime.fromisoformat(start_iso).date()
         end = datetime.fromisoformat(end_iso).date()
@@ -791,22 +924,22 @@ def daily_reconciliation_series(db_path: Path, farm_ids: list[int] | None = None
         planned_by_date = dict(
             conn.execute(
                 f"SELECT sp.planned_date, SUM(sp.quantity) FROM sale_plans sp "
-                f"WHERE sp.planned_date BETWEEN ? AND ?{farm_where} GROUP BY sp.planned_date",
-                range_params,
+                f"WHERE sp.planned_date BETWEEN ? AND ?{farm_where}{planned_type_where} GROUP BY sp.planned_date",
+                (*range_params, *planned_type_params),
             ).fetchall()
         )
         allocated_by_date = dict(
             conn.execute(
                 f"SELECT sp.planned_date, SUM(sa.quantity) {_DASHBOARD_ALLOCATED_JOIN} "
-                f"AND sp.planned_date BETWEEN ? AND ?{farm_where} GROUP BY sp.planned_date",
-                range_params,
+                f"AND sp.planned_date BETWEEN ? AND ?{farm_where}{planned_type_where}{customer_where} GROUP BY sp.planned_date",
+                (*range_params, *planned_type_params, *customer_params),
             ).fetchall()
         )
         actual_by_date = dict(
             conn.execute(
                 f"SELECT sp.planned_date, SUM(sd.quantity) {_DASHBOARD_ACTUAL_JOIN} "
-                f"AND sp.planned_date BETWEEN ? AND ?{farm_where} GROUP BY sp.planned_date",
-                range_params,
+                f"AND sp.planned_date BETWEEN ? AND ?{farm_where}{actual_type_where}{customer_where} GROUP BY sp.planned_date",
+                (*range_params, *actual_type_params, *customer_params),
             ).fetchall()
         )
 
@@ -830,11 +963,17 @@ def daily_reconciliation_series(db_path: Path, farm_ids: list[int] | None = None
         conn.close()
 
 
-def pig_type_composition(db_path: Path, farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def pig_type_composition(
+    db_path: Path, farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None
+) -> list[dict]:
     """Cơ cấu loại heo THỰC TẾ đã xuất (nguồn sale_deliveries — trả lời
     "đã bán cái gì thật", không phải kế hoạch định bán gì) trong cùng cửa
     sổ planned_date với dashboard_summary()/daily_reconciliation_series().
-    Sort giảm dần theo số lượng, kèm % trên tổng."""
+    Sort giảm dần theo số lượng, kèm % trên tổng.
+
+    customer_id: lọc "đã bán cơ cấu gì cho khách này". Không nhận
+    pig_type_id — filter đó sẽ luôn rút biểu đồ về đúng 1 lát, không có ý
+    nghĩa cho 1 chart cơ cấu."""
     if farm_ids is not None and not farm_ids:
         return []
     conn = get_connection(db_path)
@@ -843,6 +982,10 @@ def pig_type_composition(db_path: Path, farm_ids: list[int] | None = None, days:
         if farm_ids is not None:
             farm_where = f" AND sp.farm_id IN ({', '.join('?' * len(farm_ids))})"
             farm_params = tuple(farm_ids)
+        customer_where, customer_params = "", ()
+        if customer_id is not None:
+            customer_where = " AND so.customer_id = ?"
+            customer_params = (customer_id,)
         start, end = _dashboard_date_range(days)
         rows = conn.execute(
             "SELECT pt.name AS pig_type_name, SUM(sd.quantity) AS quantity "
@@ -851,9 +994,9 @@ def pig_type_composition(db_path: Path, farm_ids: list[int] | None = None, days:
             "JOIN sale_orders so ON so.id = sa.order_id "
             "JOIN sale_plans sp ON sp.id = sa.sale_plan_id "
             "LEFT JOIN pig_types pt ON pt.id = sd.pig_type_id "
-            f"WHERE so.status IN ('active','done') AND sp.planned_date BETWEEN ? AND ?{farm_where} "
+            f"WHERE so.status IN ('active','done') AND sp.planned_date BETWEEN ? AND ?{farm_where}{customer_where} "
             "GROUP BY sd.pig_type_id ORDER BY quantity DESC",
-            (start, end, *farm_params),
+            (start, end, *farm_params, *customer_params),
         ).fetchall()
         total = sum(r[1] for r in rows) or 1
         return [
@@ -875,3 +1018,71 @@ def list_needs_reconciliation(db_path: Path, farm_ids: list[int] | None = None, 
     matching = [p for p in all_plans if p.get("reconciliation_status") == "needs_reconciliation"]
     matching.sort(key=lambda p: p["planned_date"])
     return {"total": len(matching), "items": matching[:limit]}
+
+
+def list_idle_supply(db_path: Path, farm_ids: list[int] | None = None, days: int = 7, limit: int = 10) -> dict:
+    """Exception Center (STEP 10): kế hoạch đã duyệt + đã xuất chuồng
+    (received_at có giá trị) từ ÍT NHẤT `days` ngày mà vẫn còn
+    remaining_quantity > 0 (chưa được đưa vào đơn hàng nào) — heo đã
+    sẵn sàng bán nhưng ứ đọng lâu là rủi ro thật (chi phí nuôi giữ,
+    chất lượng heo giảm). Tái dùng list_sale_plans() + lọc Python, đúng
+    khuôn list_needs_reconciliation() ở trên — cùng lý do (dữ liệu nhỏ,
+    tránh định nghĩa "remaining_quantity" lệch giữa 2 nơi)."""
+    threshold = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    all_plans = list_sale_plans(db_path, farm_ids=farm_ids)
+    matching = [
+        p
+        for p in all_plans
+        if p.get("status") == "approved"
+        and p.get("received_at")
+        and p["received_at"] <= threshold
+        and p.get("remaining_quantity", 0) > 0
+    ]
+    matching.sort(key=lambda p: p["received_at"])
+    return {"total": len(matching), "items": matching[:limit]}
+
+
+def get_plan_sale_breakdown(plan_id: int, db_path: Path) -> list[dict]:
+    """Đối soát đa chiều (brief nghiệp vụ): 3 chiều Khách hàng/Giá/Phiếu cân
+    KHÔNG rút gọn về 1 cột được vì 1 kế hoạch trại có thể tách nhiều đơn
+    hàng/khách hàng/giá khác nhau (đúng tình huống "1 kế hoạch có thể phân
+    bổ cho nhiều khách hàng" brief nêu) — trả về 1 danh sách, mỗi phần tử
+    là 1 dòng hàng (sale_allocations) đã "nhặt" từ kế hoạch này, kèm khách
+    hàng/giá chốt/giá thực tế của đơn chứa dòng đó + các phiếu cân
+    (weighing_ref) đã ghi nhận qua các lần xuất giao của dòng đó."""
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        alloc_rows = conn.execute(
+            """
+            SELECT sa.id AS allocation_id, sa.quantity, sa.selling_price, sa.actual_price,
+                   so.id AS order_id, so.order_code, so.status AS order_status,
+                   c.name AS customer_name
+            FROM sale_allocations sa
+            JOIN sale_orders so ON so.id = sa.order_id
+            LEFT JOIN customers c ON c.id = so.customer_id
+            WHERE sa.sale_plan_id = ?
+            ORDER BY so.created_at ASC, sa.id ASC
+            """,
+            (plan_id,),
+        ).fetchall()
+        if not alloc_rows:
+            return []
+        allocation_ids = [r["allocation_id"] for r in alloc_rows]
+        placeholders = ", ".join("?" * len(allocation_ids))
+        ticket_rows = conn.execute(
+            f"SELECT allocation_id, weighing_ref FROM sale_deliveries "
+            f"WHERE allocation_id IN ({placeholders}) AND weighing_ref IS NOT NULL AND weighing_ref != ''",
+            tuple(allocation_ids),
+        ).fetchall()
+        tickets_by_allocation: dict[int, list[str]] = {}
+        for t in ticket_rows:
+            tickets_by_allocation.setdefault(t["allocation_id"], []).append(t["weighing_ref"])
+        breakdown = []
+        for r in alloc_rows:
+            row = dict(r)
+            row["weighing_refs"] = tickets_by_allocation.get(r["allocation_id"], [])
+            breakdown.append(row)
+        return breakdown
+    finally:
+        conn.close()

@@ -1156,6 +1156,471 @@ dữ liệu thật của kế hoạch 16 (xoá sau khi xong): cả modal chi ti�
 modal "Xử lý chênh lệch" đều hiện đúng "Tiếp tục bán: 300 con (chưa
 đóng chênh lệch)"/"Đã ghi nhận trước".
 
+### 7. Enterprise Refactor — Service Layer (STEP 1/STEP 4, 2026-08-19)
+
+Thực hiện theo `PIG_PRICE_ENTERPRISE_REFACTOR_CONTEXT.md` (lộ trình 12
+STEP, không rewrite toàn bộ, không đổi framework, không PostgreSQL, không
+microservices). Đã hoàn tất STEP 1 (Database Hardening) + STEP 4
+(Transaction Standardization, dưới dạng Service Layer) cho **toàn bộ**
+domain ghi dữ liệu của app — kể cả mảng quản trị. Branch
+`refactor/enterprise-foundation`.
+
+**Kiến trúc mới — Route → Service → Repository**:
+- **Route** (`webapp/routes/*.py`): chỉ còn lo HTTP — đọc `request`/
+  `session`, validate input, gọi service, `jsonify`/`redirect`. Không tự
+  mở transaction, không tự gọi `log_audit()` cho các hành động đã có
+  service (trừ 1 ngoại lệ có ghi chú trong code:
+  `plans.py` tạo đối soát kèm ảnh — audit cần biết số ảnh, chỉ biết được
+  *sau* khi service đã tạo bản ghi và upload file xong, nên tách audit
+  ra ngoài transaction một cách có chủ đích).
+- **Service** (`core/services/*_service.py`, mới — trước đây không có
+  tầng này): mỗi hành động ghi là 1 hàm gộp đúng **1 lần ghi repo + 1 lần
+  `audit_repo.log_action()` vào chung 1 transaction** qua
+  `core/db.py::run_in_transaction(db_path, fn)` — đóng lỗ hổng cũ "ghi
+  xong nhưng audit lỗi thì mất vết" (route trước đây gọi
+  `xxx_locked()` rồi `log_audit()` rời, không atomic). Validate nghiệp vụ
+  (trùng mã, quan hệ tham chiếu, tự xoá chính mình, role hệ thống...) vẫn
+  ở route layer — service chỉ lo transaction + audit, chưa gánh validate.
+- **Repository** (`core/repositories/*_repo.py`): mỗi hàm ghi được thêm
+  tham số `conn: sqlite3.Connection | None = None` tuỳ chọn, cùng khuôn
+  `own_connection = conn is None` — nếu gọi không kèm `conn` thì tự mở/
+  đóng/commit connection riêng như trước (100% tương thích ngược,
+  `data_access.py` `*_locked()` gọi thẳng không cần đổi gì); nếu được
+  truyền `conn` (từ service) thì dùng chung connection đó, không tự
+  commit/close, để nhiều lệnh ghi + audit gộp chung 1 transaction thật.
+
+**`core/db.py`**: thêm `db_lock` (chuyển từ `webapp/extensions.py` sang,
+1 `threading.Lock()` toàn app), `transaction(conn)` (contextmanager
+`BEGIN`/commit/rollback, no-op nếu `conn.in_transaction` đã `True`), và
+`run_in_transaction(db_path, fn)` — mở 1 connection dưới `db_lock`, chạy
+`fn(conn)` trong 1 `transaction()`, đóng connection; đây là hàm dùng
+chung của **mọi** service (`_write = run_in_transaction` ở đầu mỗi file
+service). PRAGMA `foreign_keys` cũng đã bật (STEP 1).
+
+**Domain đã migrate xong** (mỗi domain đều có integration test riêng ở
+gốc repo, `test_api_<domain>_tmp.py`, giữ lại làm nền cho `tests/` thật
+sau này — STEP 6):
+- `plan_service.py` — `sale_plans` + `sale_plan_reconciliations` (tạo/
+  duyệt/từ chối/đổi trạng thái/ghi nhận thực nhận/sửa/xoá kế hoạch trại,
+  tạo/xoá đối soát).
+- `order_service.py` — `sale_allocations` (kế hoạch bán/đơn hàng): tạo
+  đơn, thêm/sửa/xoá dòng, đổi trạng thái, khoá, hoàn tất, cập nhật thông
+  tin bán hàng/doanh thu.
+- `delivery_service.py` — `sale_deliveries` (tạo/xoá bản ghi giao hàng).
+- `customer_service.py` — `customers` (tạo/sửa/bật-tắt/xoá).
+- `authorization_service.py` — tách phần **đọc** quyền hạn (không phải
+  ghi, không dùng `run_in_transaction`) ra khỏi `webapp/routes/auth.py`
+  thành hàm thuần (`effective_permissions`/`has_permission`/
+  `has_any_permission`/`allowed_farm_ids`, nhận `user: dict | None` thay
+  vì đọc thẳng Flask `session`) — `auth.py` giữ nguyên các hàm/decorator
+  cũ làm wrapper mỏng gọi vào đây, không đổi API cho 6 file đang import.
+- `user_service.py` — quản trị tài khoản: tạo, đổi vai trò, gán trại,
+  bật/tắt, đặt lại mật khẩu, xoá.
+- `farm_service.py` — danh mục Trang trại/Khu: tạo/sửa/xoá farm, tạo/
+  sửa/xoá zone.
+- `pig_type_service.py` — danh mục Loại heo bán: tạo/sửa/bật-tắt/xoá.
+- `role_service.py` — Vai trò & phân quyền tuỳ biến: tạo/xoá role, cập
+  nhật tập quyền của role.
+
+**Lưu ý kỹ thuật khi viết test cho domain mới** (đã gặp 2 lần, tốn thời
+gian debug): (1) hàm insert-rồi-đọc-lại trong repo phải đọc lại qua
+**cùng** `conn` được truyền vào (không mở connection mới) — SQLite WAL
+không thấy được dữ liệu chưa commit từ 1 connection khác dùng chung
+transaction; (2) module nào tự `from extensions import DB_PATH` ở top
+level (import bởi `app_factory.py` cũng ở top level, không phải lazy
+trong `create_app()`) thì test phải patch `DB_PATH` riêng trên module đó
+(`routes.admin.DB_PATH = test_db`, không chỉ `extensions.DB_PATH`) — patch
+timing, không phải bug thật. `webapp/routes/auth.py` cũng dính lớp bug
+này (`current_user_permissions()` dùng `DB_PATH` module-level), nhưng
+mãi tới khi viết test cho STEP 3 (farm-scope, dưới đây) mới lộ ra — mọi
+test trước luôn dùng session role `admin`, escape hatch hardcode
+`admin` = full quyền trong `roles_repo.effective_permissions` không phụ
+thuộc DB nên che mất bug.
+
+**STEP 3 — Authorization + Data Scope (2026-08-19)**: rà soát toàn bộ
+route ghi trên `sale_plans`/reconciliation/delivery (nơi duy nhất tài
+khoản vai trò `farm` thao tác — `sale_allocations`/đơn hàng là domain
+sales/accounting, không scope theo farm, xác nhận đúng thiết kế) thì
+thấy **6/10 hành động không kiểm tra farm-scope** dù thao tác trên 1 bản
+ghi cụ thể có `farm_id`, chỉ dựa vào permission gate
+(`@permission_required`) — 1 admin lỡ cấp nhầm 1 trong các quyền
+`plans.review`/`plans.delete`/`plans.reconcile_delete`/
+`plans.delivery_delete` cho role `farm` qua `/admin/permissions` (chưa
+xảy ra trong DB thật, đã xác nhận) sẽ khiến user vai trò farm thao tác
+được trên **bất kỳ trại nào**, không chỉ trại được gán. Đã thêm guard
+`allowed_farm_ids()` (khuôn có sẵn, lặp lại y hệt) vào
+`api_plans_approve`/`api_plans_reject`/`api_plans_update`/
+`api_plans_delete`/`api_plan_reconciliation_delete` (`plans.py`) và
+`api_delivery_delete` (`deliveries.py`) — thuần route layer, không đổi
+service/repository/permission catalog/UI. Verify bằng
+`test_api_farm_scope_tmp.py`: cấp tạm 4 quyền trên cho role `farm` trên
+DB test, mô phỏng đúng tình huống rủi ro với 2 tài khoản farm (đúng/sai
+trại).
+
+### 8. STEP 5 — Security Hardening (2026-08-19)
+
+7 hạng mục P0 theo mục 17 tài liệu refactor. Đã xác nhận với người dùng:
+app có cả truy cập LAN trực tiếp (HTTP) lẫn qua Cloudflare Tunnel
+(HTTPS) → không thể ép `Secure` cookie vô điều kiện; đồng ý thêm
+`flask-wtf`/`flask-limiter`; secret key lưu file cục bộ gitignore.
+
+- **Secret key bền vững**: trước đây `secrets.token_hex(32)` sinh random
+  mỗi lần khởi động (mọi phiên mất hiệu lực khi restart) — nay đọc/tạo
+  từ `webapp/secret_key.txt` (gitignore, khớp cách `webapp/password.txt`
+  đang làm).
+- **Session cookie**: `HTTPONLY=True`, `SAMESITE=Lax` (an toàn cả LAN
+  lẫn Tunnel); `SECURE` tuỳ biến qua env `SESSION_COOKIE_SECURE=1`, mặc
+  định `False` — nếu sau này khẳng định 100% truy cập qua Tunnel HTTPS,
+  chỉ cần set biến môi trường, không cần sửa code.
+- **CSRF**: `CSRFProtect(app)` (flask-wtf) bảo vệ toàn bộ route ghi tự
+  động. Thay vì sửa tay 66+ lệnh `fetch()` rải rác ở 10 file JS
+  (`plan.js`/`allocation.js`/`admin_*.js`...), dùng 1 file mới
+  `webapp/static/js/core/csrf.js` **monkey-patch `window.fetch` toàn
+  cục** (đọc token từ `<meta name="csrf-token">`, tự thêm header
+  `X-CSRFToken` cho mọi request same-origin) — nạp trước `core/api.js`
+  trong `base.html`, không `defer` (đúng quy ước thứ tự script ở mục
+  I.6). Nhờ vậy không cần sửa dòng nào ở 10 file JS domain hiện có. 2
+  form HTML thường (`login.html`, form đăng xuất trong `base.html`)
+  thêm `{{ csrf_token() }}` hidden field riêng.
+- **Login rate limiting**: `flask-limiter` (in-memory, đủ 1 máy),
+  `@limiter.limit("10 per minute")` trên route `login()`.
+- **Test client**: 9 `test_api_*_tmp.py` phải thêm
+  `app.config["WTF_CSRF_ENABLED"] = False` (test client gọi thẳng
+  `client.post(json=...)`, không qua `fetch()`/`csrf.js` nên không có
+  token).
+- **Ngoài phạm vi** (có lý do, xem plan lúc thực hiện): không sửa
+  `ProxyFix` (rủi ro còn lại chỉ ảnh hưởng độ chính xác IP trong
+  `audit_log`, không bypass auth/permission/data-scope); không thêm
+  session timeout (quyết định UX, chưa hỏi); không migrate 66 `fetch()`
+  sang dùng `core/api.js` (nằm ngoài phạm vi CSRF).
+
+### 9. STEP 6 (Automated Tests) + STEP 7 (Route Refactor, toàn bộ domain) — 2026-08-19
+
+Theo mục 19 tài liệu refactor: "Mục tiêu là có regression protection
+trước khi refactor sâu" — làm STEP 6 trước, STEP 7 sau, đúng thứ tự.
+
+**STEP 6 — pytest thật trong `tests/`** (9 script `test_api_*_tmp.py` ở
+gốc repo **đã xoá**, không còn tồn tại — đừng tin phần mô tả 9 script đó
+ở mục 8 phía trên, nó chỉ đúng tại thời điểm viết STEP 5):
+- `tests/conftest.py` gộp khuôn lặp lại 9 lần thành fixture dùng chung:
+  `test_db`/`app`/`client`/`admin_client`/`ref_ids`/`db_connection`.
+  `audit_actions`/`login_as` là **fixture trả về closure** (không phải
+  hàm module-level) — tránh phải `import` xuyên `tests/integration/` →
+  `tests/security/` không ổn định dưới cơ chế rootless collection mặc
+  định của pytest (không có `__init__.py` trong `tests/`).
+- **Bẫy quan trọng**: `extensions.limiter` (STEP 5) là singleton cấp
+  module dùng chung mọi lần gọi `create_app()` trong CÙNG process —
+  pytest chạy nhiều test trong 1 process nên fixture `app` phải gọi
+  `extensions.limiter.reset()` mỗi lần, không thì rate-limit `/login`
+  cộng dồn qua các test khác nhau (IP giả `127.0.0.1` giống nhau ở mọi
+  test client), có thể làm 1 test đăng nhập bị `429` oan.
+- `tests/integration/` (8 file, migrate 1:1 từ 8 script cũ) +
+  `tests/security/test_farm_scope.py` (migrate từ
+  `test_api_farm_scope_tmp.py`) + `tests/services/test_plan_service.py`
+  (**mới**, unit test thật gọi thẳng `plan_service.create_plan()` không
+  qua Flask — 0.29s cho 10 test, so với 6s cho 12 test integration qua
+  Flask, minh chứng cụ thể giá trị của việc validate sống trong service).
+
+**STEP 7 — Route Refactor (toàn bộ domain ghi)**: theo kiến trúc mục
+tiêu ở mục II.7 (Route → Service → Repository), chuyển validate định
+dạng/giá trị input vào service cho **mọi** domain ghi trong app (bắt đầu
+2 domain mẫu plan+order, sau đó mở rộng hết phần còn lại trong cùng
+ngày). **Nguyên tắc phạm vi nhất quán xuyên suốt cả 2 đợt** — 3 loại
+check sau LUÔN giữ ở route layer, không di chuyển:
+1. **Farm-scope check** (`allowed_farm_ids`) — nhất quán với STEP 3.
+2. **Check tham chiếu sang domain khác khi xoá** (VD `count_orders_for_
+   customer_locked`, `count_plans_for_farm_locked`, `count_users_with_
+   role_locked`...) — route đã có sẵn logic này, đây là business rule
+   tham chiếu, không phải validate input thuần.
+3. **Bất biến bảo mật gắn với định danh/session** — tự xoá chính mình +
+   xoá admin cuối cùng (`user_service.delete_user`, dùng
+   `session["user"]["id"]`), role `admin` bất khả xâm phạm
+   (`role_service`), role hệ thống không xoá được.
+
+Việc **được** di chuyển vào service (parse định dạng, độ dài chuỗi,
+trùng mã/tên, ngày hợp lệ, tồn tại tham chiếu hợp lệ — VD `pig_type_id`
+có active không):
+- `plan_service.py`: `_validate_plan_fields(data, db_path)` — gộp đúng
+  2 khối validate bị copy-paste giống hệt nhau ở `api_plans_create()` và
+  `api_plans_edit()` thành 1 chỗ.
+- `order_service.py`: `_validate_lines(raw_lines, db_path)` — chuyển
+  nguyên `_validate_order_lines()` từ `plans.py`.
+- `delivery_service.py`: `_validate_delivery_fields(data, plan, db_path)`
+  — gồm cả check "vượt quá kế hoạch" (đọc `sum_delivered_for_plan`).
+  `create_delivery()` đổi contract: nhận `(allocation_id, plan,
+  order_code, data thô, ...)`, tự build `audit_new_value` bên trong.
+- `customer_service.py`: `_validate_customer_fields(data, *,
+  name_required_msg)` — 2 route gốc có 2 message lỗi "thiếu tên" khác
+  nhau, giữ qua tham số để không đổi hành vi.
+- `farm_service.py`: `_validate_farm_fields()`/`_validate_zone_fields()`.
+- `pig_type_service.py`: `_validate_pig_type_fields()`.
+- `role_service.py`: `_validate_role_fields()`/`_validate_permission_
+  keys()` (`ROLE_KEY_RE` chuyển từ `admin.py` sang đây).
+- `user_service.py`: `_validate_new_username()`/`_validate_password()`/
+  role hợp lệ (`update_role`)/farm_ids hợp lệ (`assign_farms`). Fallback
+  im lặng `role="sales"` khi thiếu/sai ở `create_user` **vẫn ở route**
+  (khác hẳn validate-raise, không phải lỗi cần báo).
+
+Tất cả route giờ theo đúng 1 khuôn: parse JSON tối thiểu (chỉ phần cần
+cho farm-scope/tham chiếu) → gọi service trong
+`try/except ValueError as e: return jsonify({"error": str(e)}), 400`.
+Verify: 22/22 test pytest PASS **không đổi 1 dòng nào trong `tests/`**
+qua cả 2 đợt refactor — xác nhận hành vi HTTP-facing (message lỗi,
+status code, audit trail) giữ nguyên tuyệt đối.
+
+### 10. STEP 8 — Enterprise UI, 6 phase (2026-08-20)
+
+Theo mục 14 tài liệu refactor (Navigation/Page Header/KPI/Filter/Table/
+Detail/Action Bar/Status/Exception/Mobile). Audit trước khi làm (qua
+Explore agent, đọc hết `webapp/templates/` + JS đi kèm) phát hiện app
+chia 2 nhóm rõ rệt: **Nhóm A** (`dashboard`/`plans`/`allocations`/
+`doi_soat`/`admin_audit`/`bao_cao`) đã có design system từ đợt UX brief
+cũ (`page-header`/`breadcrumb`/`badge`/`toast`/`confirmModal`); **Nhóm
+B** (`khach_hang`/`admin_farms`/`admin_pig_types`/`admin_users`/
+`admin_permissions`) hoàn toàn chưa đụng, còn dùng
+`alert()/confirm()/prompt()` thô.
+
+**Phase 1 — trang "Xuất giao" độc lập (mới)**: trước đây dữ liệu xuất
+giao chỉ lồng trong chi tiết đơn hàng. `sale_deliveries_repo.
+list_deliveries(db_path, farm_ids=None)` (JOIN thêm `sale_plans`+`farms`
+để lọc/hiển thị theo trại) + `GET /xuat-giao` + `GET /api/deliveries`
+(dùng lại `_VIEW_PLAN_PERMS` có sẵn, không tạo permission mới) +
+`xuat_giao.html`/`.js` (khuôn `doi_soat.js`: fetch 1 lần, filter
+client-side).
+
+**Phase 2 — trang "Cấu hình" placeholder (mới)**: `GET /admin/config`,
+`.empty-state`, chưa có nội dung thật — chỉ tạo khung để nav khớp tài
+liệu, gate bằng `ADMIN_PERMISSIONS_MANAGE` có sẵn.
+
+**Phase 3 — nav regroup**: `base.html`'s `<nav class="topbar-nav">` (1
+danh sách phẳng 13 mục) nhóm thành 4 khối VẬN HÀNH/DỮ LIỆU/BÁO CÁO/QUẢN
+TRỊ (thêm `.nav-group`/`.nav-group-title` vào `style.css`) — **dùng
+chung layout dọc có sẵn cho cả dropdown mobile lẫn sidebar cố định
+desktop** (app có layout sidebar-trái ở `@media min-width:1024px`,
+không phải topbar ngang cổ điển — cả 2 chế độ render CÙNG 1 `<nav>` nên
+không cần CSS riêng theo breakpoint). Giữ nguyên 100% logic
+`current_user_can(...)` gate từng mục, không đổi permission nào.
+
+**Phase 4 — redesign 5 trang Nhóm B**: áp `page-header`/`breadcrumb`/
+`admin-table-responsive`/`badge` (thay `.status-dot`). 7 `prompt()` sửa
+từng field của khách hàng (`khach_hang.js`, nặng nhất) gộp thành 1 modal
+multi-field `#cus-edit-modal` (khuôn `#sale-details-modal` ở
+`allocation.js`). Farm/zone/pig-type (1-2 field) dùng `promptModal()`
+tuần tự — đủ dùng, không cần modal riêng. Toàn bộ `confirm()`/`alert()`
+còn lại → `confirmModal()`/`showToast()`. `admin_users.js`: đổi vai trò
+qua `<select onchange>` giờ `confirmModal()` trước, revert bằng
+`select.dataset.previousValue` (khởi tạo lúc load trang) nếu huỷ — không
+cần `location.reload()` để revert như trước. `doi_soat.js`'s
+`dsStatusBadge()` (tự trùng `.badge-*` cục bộ) xoá, dùng chung
+`renderBadge()` — thêm 4 key `needs_reconciliation`/`in_progress`/
+`reconciled`/`over_delivered` vào `STATUS_CONFIG` (`core/status.js`).
+
+**Phase 5 — BỎ QUA, có lý do**: kế hoạch ban đầu định chuyển
+`plans.html`/`allocations.html` sang kebab-menu `.action-menu` (CSS có
+sẵn, chưa từng dùng thật). Kiểm tra lại `plan.js`/`allocation.js` thì cả
+2 **đã** dùng khuôn table-row + `detailModal()` (từ đợt redesign
+list-view TRƯỚC Enterprise Refactor) — click dòng mở modal, hành động
+hiện thành hàng nút phẳng NGAY TRONG modal, đã giải quyết đúng vấn đề
+"nhiều action" mà `.action-menu` định giải quyết, chỉ khác cách làm. 5
+trang Nhóm B chỉ 2-3 nút/dòng, không đủ "chật" để cần kebab. `.action-
+menu` CSS giữ nguyên làm hạ tầng sẵn có, chưa wiring JS vì chưa có nơi
+thật sự cần — tránh thêm abstraction không cần thiết.
+
+**Phase 6 — mobile responsiveness còn thiếu**: `dashboard.html`'s bảng
+theo ngày thêm `admin-table-responsive` (data-label đã có sẵn trong
+`dashboard.js`, chỉ thiếu 1 class). Ma trận quyền×role
+(`admin_permissions.html`) xác nhận qua Browser pane thật ở 375px — ĐÃ
+đúng từ trước nhờ `.admin-table-wrap { overflow-x: auto }` có sẵn, không
+cần sửa gì.
+
+Verify mỗi phase: qua Browser pane thật (không chỉ đọc code) — desktop
++ mobile (375px), console/network sạch lỗi, dữ liệu thật render đúng,
+modal mở/điền đúng giá trị, DB thật sạch sau khi verify. 22/22 test
+pytest PASS xuyên suốt cả 6 phase.
+
+### 11. STEP 9 (Task Center) + STEP 10 (Exception Center) — 2026-08-20
+
+Theo mục 15 tài liệu refactor (Control Tower): Task Center trả lời "Tôi
+cần làm gì?", Exception Center trả lời "Có vấn đề gì cần xử lý?" — tài
+liệu không nêu tiêu chí phân biệt cụ thể, phải tự định nghĩa.
+
+**STEP 9 — đã thực chất tồn tại, không cần code thêm**: khối "⚠️ Cần xử
+lý" trên Tổng quan (`webapp/routes/dashboard.py::_build_exceptions()`)
+đã liệt kê đúng 5 việc-cần-làm cá nhân hoá theo quyền (kế hoạch chờ
+duyệt, quá ngày chưa xuất chuồng, đơn chưa chốt bán, đơn chưa ghi doanh
+thu, kế hoạch cần đối soát) — thực chất là Task Center dù tên hàm gây
+nhầm (giữ nguyên tên, tránh diff không cần thiết).
+
+**STEP 10 — Exception Center mới, khác Task Center về BẢN CHẤT**: Task
+Center là việc-thường-quy đang chờ (sẽ luôn có, không phải dấu hiệu sai);
+Exception là bất thường/trễ hạn nghiêm trọng/rủi ro mất dữ liệu — thứ
+KHÔNG NÊN tồn tại nếu vận hành trơn tru. 4 tiêu chí, tất cả suy ra được
+từ dữ liệu có sẵn, **không thêm cột/bảng nào** (đúng nguyên tắc "thuần
+cộng thêm"):
+
+1. **Đơn "Đã bán" ≥14 ngày chưa ghi doanh thu**
+   (`sale_orders_repo.list_stale_awaiting_revenue()`) — khác Task
+   Center's mục doanh thu (liệt kê TẤT CẢ) ở chỗ chỉ lấy bản ĐÃ TRỄ HẠN.
+   `sale_orders` không có cột "done_at" — suy thời điểm `mark_done` từ
+   `audit_log` (`action='order.mark_done'`). **2 bẫy SQLite gặp phải**:
+   (a) `audit_log.entity_id` khai TEXT, phải `CAST(entity_id AS
+   INTEGER)` mới so đúng với `sale_orders.id` (INTEGER) trong `IN
+   (...)`; (b) `audit_log.at` lưu ISO8601 KÈM offset giờ VN (VD
+   `"...T09:38:35+07:00"`), khác định dạng UTC `"YYYY-MM-DD HH:MM:SS"`
+   của `datetime('now')` — so sánh chuỗi thô sai âm thầm (không lỗi,
+   chỉ trả sai kết quả), phải bọc `datetime(at)` để SQLite tự quy đổi
+   trước khi so.
+2. **Kế hoạch đã duyệt + đã xuất chuồng (`received_at` có giá trị) ≥7
+   ngày mà còn `remaining_quantity > 0`**
+   (`sale_plans_repo.list_idle_supply()`) — nguồn cung sẵn sàng bán
+   nhưng ứ đọng lâu (chi phí nuôi giữ, heo giảm chất lượng). Tái dùng
+   `list_sale_plans()` + lọc Python (khuôn `list_needs_reconciliation()`
+   có sẵn) — `received_at` ghi bằng `datetime.now().isoformat(...)`
+   Python-side (naive, không offset) nên so sánh chuỗi Python-side an
+   toàn, không dính bẫy timezone như mục 1.
+3. **Bản ghi xuất giao thiếu trọng lượng**
+   (`sale_deliveries_repo.list_deliveries_missing_weight()`, `WHERE
+   total_weight_kg IS NULL`) — vi phạm nguyên tắc "dữ liệu bất di bất
+   dịch phải căn cứ theo kết quả cân thực tế" (mục I.1).
+4. **Vai trò `farm` được cấp quyền vượt phạm vi mặc định**
+   (`roles_repo.list_unexpected_farm_permissions()`, mặc định chỉ
+   `plans.create`/`plans.receive`) — biến rủi ro đã vá ở STEP 3
+   (farm-scope check) thành tín hiệu giám sát SỐNG: nếu admin lỡ cấp
+   thêm quyền cho role `farm` qua `/admin/permissions`, Exception Center
+   tự cảnh báo ngay.
+
+**Wiring**: 4 wrapper `*_locked()` trong `webapp/data_access.py` (khuôn
+các hàm liền kề) → `_build_true_exceptions(farm_ids)` trong
+`webapp/routes/dashboard.py` (mỗi mục gate 1 permission: mục 1
+`PLAN_REVENUE_DETAILS`, mục 2 `PLAN_ALLOCATION_CREATE`, mục 3
+`DELIVERY_CREATE`, mục 4 `ADMIN_PERMISSIONS_MANAGE`) → route mới `GET
+/canh-bao` (`@permission_required(*_VIEW_EXCEPTION_PERMS)`, vào được nếu
+có ÍT NHẤT 1/4 quyền, khuôn `_VIEW_PLAN_RECONCILE_PERMS`) → template mới
+`webapp/templates/canh_bao.html` (copy khuôn `.alert.exception-group`
+của khối "Cần xử lý" nhưng dùng `.alert-danger` thay `.alert-warning` —
+CSS có sẵn, phân biệt sắc thái "vấn đề thật" khỏi "việc thường quy") →
+nav link "🚨 Cảnh báo" trong `base.html` (nhóm VẬN HÀNH, ngay sau "Tổng
+quan", gate OR của 4 permission).
+
+Ngưỡng thời gian (14 ngày/7 ngày) là tham số `days=` trong hàm repo
+(không hardcode rải rác) — số khởi điểm hợp lý dựa trên chu kỳ nghiệp vụ
+đã biết, chỉnh lại dễ dàng nếu cần.
+
+Verify: `tests/services/test_exception_center.py` (4 test, gọi thẳng
+hàm repo, seed dữ liệu qua `admin_client` HTTP — không giả lập SQL trực
+tiếp vì cần đúng service/audit layer ghi lại thời điểm thật) — riêng
+mục 1 cần backdate `audit_log.at` thủ công (trên DB tạm) để test được
+nhánh "đã trễ hạn" mà không phải chờ 14 ngày thật; 26/26 test pytest
+PASS. UI verify qua Browser pane thật: trạng thái rỗng (đăng nhập admin
+thật, `/canh-bao` không có cảnh báo — DB thật hiện đang sạch) + trạng
+thái có dữ liệu (script Flask test-client trên DB tạm, seed đủ 4 tình
+huống, xác nhận cả 4 khối render đúng nội dung) + nav link "🚨 Cảnh báo"
+xuất hiện đúng vị trí, đúng quyền.
+
+### 12. Brief nghiệp vụ "Kế hoạch → Chào hàng → Chốt bán → Xuất thực tế → Đối soát → Hoàn tất", 5 phase (2026-08-20)
+
+User cung cấp lại brief gốc (`brief_ngan_gon_cai_tien_web_ban_heo.md`, không
+lưu trong repo) + ảnh dashboard mẫu, yêu cầu hệ thống xuyên suốt theo 6 giai
+đoạn trên, đối soát đa chiều (8 chiều), không sửa dữ liệu kế hoạch để che
+lệch. Đã audit kỹ (2 Explore agent) trước khi lên plan — phần lớn brief đã
+được đáp ứng qua các đợt Giai đoạn 1-9/STEP 8/STEP 10 trước đó (KPI dashboard,
+trang Đối soát riêng, nguyên tắc bất biến kế hoạch); phần thật sự còn thiếu
+chia thành 5 phase độc lập, mỗi phase test + verify + commit riêng.
+
+**Phase 1 — Đối soát: hiện đủ 3 chiều đã tính sẵn.** Trang Đối soát trước đó
+chỉ so 1/8 chiều (số lượng). `webapp/templates/doi_soat.html`/`doi_soat.js`
+thêm cột "Chốt" (`allocated_quantity`) và "Ngày xuất thực tế"
+(`last_delivered_date`) — đổi nhãn "Đã bán"→"Thực tế"/"Chưa xử lý"→"Chênh
+lệch" khớp thuật ngữ brief ("Kế hoạch | Chốt | Thực tế | Chênh lệch") — cùng
+badge "Lệch cơ cấu"/"Khối lượng" trong cột Ghi chú, tái dùng đúng field đã
+tính sẵn ở `sale_plans_repo.py` (`delivery_mix`/`off_type_quantity`/
+`planned_total_weight_kg`/`actual_total_weight_kg`) trước đó chỉ hiện ở trang
+Kế hoạch. Thuần frontend, không đổi API/repo.
+
+**Phase 2 — Đối soát: breakdown Khách hàng/Giá/Phiếu cân theo kế hoạch.** 3
+chiều còn lại brief yêu cầu không rút gọn về 1 cột được (1 kế hoạch trại có
+thể tách nhiều đơn/khách/giá) — `sale_plans_repo.get_plan_sale_breakdown()`
+(JOIN `sale_allocations→sale_orders→customers` + `sale_deliveries.
+weighing_ref`) trả về danh sách, route mới `GET /api/plans/<id>/
+sale-breakdown`, UI: bấm mã kế hoạch ở trang Đối soát mở `detailModal()`
+hiện bảng đơn hàng/khách hàng/giá chốt/giá thực tế/phiếu cân.
+
+**Phase 3 — Dashboard: filter trại/khách hàng/loại heo.** Giai đoạn 7 trước
+đây chủ động bỏ qua filter bar của ảnh mẫu ("cần backend query-param
+changes") — brief lần này xác nhận lại cần. `dashboard_summary()`/
+`daily_reconciliation_series()`/`pig_type_composition()` nhận thêm
+`customer_id`/`pig_type_id` tuỳ chọn: `customer_id` chỉ áp lên
+allocated/actual (qua `so.customer_id`, `sale_plans` không có khái niệm
+khách hàng); `pig_type_id` áp `sp.pig_type_id` cho planned/allocated (loại
+ĐĂNG KÝ) nhưng `sd.pig_type_id` cho actual (loại THỰC TẾ, có thể khác —
+đúng khái niệm lệch cơ cấu). `/api/dashboard/summary` nhận thêm `farm_id`
+(thu hẹp trong `allowed_farm_ids`, không cho chọn ngoài quyền). UI: 3
+`<select>` mới lấy option từ API GET có sẵn (`/api/farms`/`/api/customers`/
+`/api/pig-types`), không tạo route mới.
+
+**Phase 4 — Tách "Kế hoạch bán" thành Chào hàng + Chốt bán (rủi ro IA lớn
+nhất).** Trang `/ke-hoach-ban` cũ gộp chọn nguồn+giỏ nháp+toàn bộ quản lý
+đơn hàng — brief muốn mỗi giai đoạn 1 trang riêng (user chọn phương án này
+qua AskUserQuestion, chấp nhận rủi ro IA lớn hơn thay vì giữ nguyên 1 trang
++ stepper). "Xuất thực tế" (`/xuat-giao`) và "Đối soát" đã tách sẵn từ
+trước, chỉ đổi nhãn "Xuất giao"→"Xuất thực tế". Tách 2 trang mới:
+- **`/chao-hang`** (`chao_hang.js`, kế thừa phần chọn nguồn/giỏ nháp/tạo đơn
+  của `allocation.js` cũ): tạo đơn xong hiện link "Sang Chốt bán để xử lý
+  tiếp →".
+- **`/chot-ban`** (`chot_ban.js`, kế thừa phần quản lý đơn hàng của
+  `allocation.js` cũ): danh sách + toàn bộ modal (chốt bán/đã bán/doanh
+  thu/xuất giao/heo loại-hủy/khoá/xoá). Nút "➕ Thêm dòng" điều hướng sang
+  `/chao-hang?target_order=<id>&target_order_code=<code>` (thay vì cuộn tới
+  form cùng trang) — `chao_hang.js` đọc query param lúc tải trang để
+  pre-fill đúng ngữ cảnh "đang thêm vào đơn X".
+
+`/ke-hoach-ban` (route cũ) → redirect 303 sang `/chot-ban`, giữ bookmark cũ.
+`allocations.html`/`allocation.js` xoá. Cập nhật mọi nơi trỏ tới
+`plans.allocations_page` (đã audit ra danh sách cụ thể): `PROCESS_STEPS`
+(bước 4→Chào hàng, bước 5-7→Chốt bán), 3 khối link "Cần xử lý"
+(`dashboard.py`), nav `base.html` (2 link mới đúng permission), process-nav
+breadcrumb (3 bước→5 bước: Kế hoạch trại/Chào hàng/Chốt bán/Xuất thực
+tế/Đối soát).
+
+**Phase 5 — Hộp thư Thông báo (bảng mới, đọc/chưa đọc).** Ảnh mẫu có
+"Thông báo" tách khỏi "Cảnh báo" — user xác nhận làm thật (không có trong
+brief text, chỉ có trong ảnh, nhưng user chọn làm). Bảng mới
+`notifications` (`recipient_username`, `title`, `body`, `link_url`,
+`is_read`, `created_at`) — bản ghi PERSIST nhắm 1 người cụ thể, khác
+audit_log (lịch sử mọi hành động, không ai đọc) và Cảnh báo/Cần xử lý
+(tính động, không lưu). `core/services/notification_service.py::notify()`
+resolve người nhận = mọi user active có quyền `permission_key` (lọc thêm
+farm nếu vai trò `farm`).
+
+**Bug thật gặp lúc build, đáng nhớ**: `notify()` bản đầu gọi các hàm repo
+đọc kiểu `users_repo.list_users()`/`roles_repo.effective_permissions()`
+(mỗi hàm tự mở connection riêng qua `get_connection()`, mà hàm này LUÔN
+chạy `executescript(_DB_SCHEMA)` — một thao tác kiểu ghi schema) — trong
+khi `notify()` luôn được gọi từ BÊN TRONG 1 transaction ghi CHƯA COMMIT
+(`run_in_transaction`'s `_do(conn)`). Mở connection mới rồi chạy thao tác
+kiểu ghi trong lúc connection kia đang giữ transaction ghi mở gây tranh
+khoá dây chuyền — pytest treo hơn 120 giây (mỗi user trong vòng lặp
+`notify()` phải chờ hết `busy_timeout=10s` của `get_connection()`). Fix:
+viết lại `notify()` đọc thẳng qua `conn` được truyền vào (bắt buộc, không
+còn optional) bằng SQL trực tiếp, không qua tầng repo tự mở connection.
+**Bài học chung cho code sau này**: bất kỳ hàm nào chạy bên trong
+`_do(conn)` của `run_in_transaction` phải dùng lại đúng `conn` đó cho MỌI
+thao tác DB (kể cả đọc), không được gọi hàm repo tự mở connection riêng.
+
+5 điểm gắn (chọn giá trị nhất, không instrument toàn bộ): kế hoạch mới (→
+`PLAN_REVIEW`), duyệt/từ chối kế hoạch (→ báo ngược người tạo qua
+`created_by`), đơn đã bán (→ `PLAN_REVENUE_DETAILS`), xuất giao thiếu cân
+(→ `DELIVERY_CREATE`, đúng tiêu chí Exception Center mục 3), role `farm`
+vượt quyền mặc định (→ `ADMIN_PERMISSIONS_MANAGE`, đúng tiêu chí Exception
+Center mục 4). Route `GET /thong-bao` + 4 API (list/unread-count/
+mark-read/mark-all-read). UI tái dùng `.timeline` có sẵn (khuôn
+`admin_audit.html`) + badge số chưa đọc trên nav
+(`core/notifications-badge.js`, load 1 lần lúc trang tải, KHÔNG polling —
+v1 cố ý đơn giản).
+
+**Verify tổng**: mỗi phase test + Browser pane thật riêng (không dồn cuối);
+34/34 pytest PASS sau cả 5 phase; DB thật sạch sau mỗi lần verify.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng

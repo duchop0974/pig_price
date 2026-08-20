@@ -201,6 +201,7 @@ def lock_record(
     db_path: Path,
     ip: str | None = None,
     username: str | None = None,
+    conn=None,
 ) -> bool:
     """Khoá vĩnh viễn dùng chung cho mọi bảng có trigger BEFORE UPDATE guard
     (sale_plans, sale_allocations, weighing_records, sale_orders — Data
@@ -212,13 +213,17 @@ def lock_record(
     if table not in LOCKABLE_TABLES:
         raise ValueError(f"Bảng '{table}' không nằm trong danh sách được phép khoá: {LOCKABLE_TABLES}")
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(
             f"UPDATE {table} SET locked_at = ?, locked_by = ? WHERE id = ? AND locked_at IS NULL",
             (now, username, record_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()

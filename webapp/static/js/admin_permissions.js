@@ -31,13 +31,19 @@ async function handleRoleDelete(e) {
   const btn = e.target.closest(".btn-role-delete");
   if (!btn) return;
   const key = btn.dataset.key;
-  if (!confirm(`Xóa vai trò "${key}"? (chỉ xóa được nếu không còn tài khoản nào dùng)`)) return;
+  const ok = await confirmModal({
+    title: `Xoá vai trò "${key}"?`,
+    body: "Chỉ xoá được nếu không còn tài khoản nào dùng.",
+    confirmLabel: "Xoá vĩnh viễn",
+  });
+  if (!ok) return;
   const res = await fetch(`/api/admin/roles/${key}`, { method: "DELETE" });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
-    alert(payload.error || "Lỗi khi xóa vai trò.");
+    showToast(payload.error || "Lỗi khi xóa vai trò.", "danger");
     return;
   }
+  showToast("Đã xoá vai trò.", "success");
   location.reload();
 }
 

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Cảnh báo{% endblock %}
+{% block brand_title %}🚨 Cảnh báo{% endblock %}
+{% block brand_sub %}Bất thường / trễ hạn nghiêm trọng cần xử lý — khác "Cần xử lý" ở Tổng quan (việc thường quy){% endblock %}
+
+{% block content %}
+  <nav class="breadcrumb">
+    <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+    <span>/</span>
+    <span>Cảnh báo</span>
+  </nav>
+
+  <div class="page-header">
+    <div>
+      <h1>🚨 Cảnh báo</h1>
+      <p class="page-header-desc">
+        Chỉ liệt kê những vấn đề THẬT SỰ bất thường (trễ hạn nghiêm trọng, rủi ro mất dữ liệu) —
+        không phải việc-thường-quy đang chờ xử lý (xem mục "Cần xử lý" ở Tổng quan cho việc thường quy).
+      </p>
+    </div>
+  </div>
+
+  {% if exceptions %}
+  <section class="card">
+    {% for ex in exceptions %}
+    <div class="alert alert-danger exception-group">
+      <div class="exception-group-title">{{ ex.icon }} {{ ex.text }}</div>
+      <div class="exception-items">
+        {% for it in ex.entries %}
+        <a class="exception-item-link" href="{{ it.url }}">{{ it.label }} →</a>
+        {% endfor %}
+        {% if ex.total > ex.entries|length %}
+        <a class="exception-item-link" href="{{ ex.more_url }}">+{{ ex.total - ex.entries|length }} khác, xem tất cả →</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section class="card">
+    <div class="empty-state">
+      <div class="empty-state-title">✓ Không có cảnh báo nào</div>
+      <div class="empty-state-desc">Vận hành đang trơn tru — không phát hiện bất thường nào trong phạm vi bạn được xem.</div>
+    </div>
+  </section>
+  {% endif %}
+{% endblock %}

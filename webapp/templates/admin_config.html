@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Cấu hình{% endblock %}
+{% block brand_title %}⚙️ Cấu hình{% endblock %}
+{% block brand_sub %}Thiết lập chung của hệ thống{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Cấu hình</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">⚙️ Cấu hình</h1>
+    <p class="page-header-desc">Thiết lập chung của hệ thống</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="empty-state">
+      <div class="empty-state-title">Chưa có mục cấu hình nào</div>
+      <div class="empty-state-desc">Trang này đang để trống, sẽ bổ sung nội dung cấu hình sau.</div>
+    </div>
+  </section>
+{% endblock %}

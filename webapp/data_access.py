@@ -6,6 +6,7 @@ from core.repositories import (
     farms_repo,
     incident_repo,
     media_repo,
+    notifications_repo,
     pig_types_repo,
     plan_reconciliation_repo,
     prices_repo,
@@ -273,19 +274,29 @@ def count_plans_for_pig_type_locked(pig_type_id: int) -> int:
         return sale_plans_repo.count_plans_for_pig_type(pig_type_id, DB_PATH)
 
 
-def dashboard_summary_locked(farm_ids: list[int] | None = None, days: int = 30) -> dict:
+def dashboard_summary_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None, pig_type_id: int | None = None
+) -> dict:
     with db_lock:
-        return sale_plans_repo.dashboard_summary(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.dashboard_summary(
+            DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id
+        )
 
 
-def daily_reconciliation_series_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def daily_reconciliation_series_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None, pig_type_id: int | None = None
+) -> list[dict]:
     with db_lock:
-        return sale_plans_repo.daily_reconciliation_series(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.daily_reconciliation_series(
+            DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id
+        )
 
 
-def pig_type_composition_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def pig_type_composition_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None
+) -> list[dict]:
     with db_lock:
-        return sale_plans_repo.pig_type_composition(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.pig_type_composition(DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id)
 
 
 def list_needs_reconciliation_locked(farm_ids: list[int] | None = None, limit: int = 5) -> dict:
@@ -406,6 +417,37 @@ def list_awaiting_sale_details_locked(limit: int = 5) -> dict:
 def list_awaiting_revenue_locked(limit: int = 5) -> dict:
     with db_lock:
         return sale_orders_repo.list_awaiting_revenue(DB_PATH, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Cảnh báo (Exception Center — STEP 10, khác Cần xử lý ở trên: chỉ bất
+# thường/trễ hạn nghiêm trọng, không phải việc thường quy)
+# ---------------------------------------------------------------------------
+
+
+def list_stale_awaiting_revenue_locked(days: int = 14, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_orders_repo.list_stale_awaiting_revenue(DB_PATH, days=days, limit=limit)
+
+
+def list_idle_supply_locked(farm_ids: list[int] | None = None, days: int = 7, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_plans_repo.list_idle_supply(DB_PATH, farm_ids=farm_ids, days=days, limit=limit)
+
+
+def get_plan_sale_breakdown_locked(plan_id: int) -> list[dict]:
+    with db_lock:
+        return sale_plans_repo.get_plan_sale_breakdown(plan_id, DB_PATH)
+
+
+def list_deliveries_missing_weight_locked(farm_ids: list[int] | None = None, limit: int = 10) -> dict:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries_missing_weight(DB_PATH, farm_ids=farm_ids, limit=limit)
+
+
+def list_unexpected_farm_permissions_locked() -> list[str]:
+    with db_lock:
+        return roles_repo.list_unexpected_farm_permissions(DB_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +578,11 @@ def list_deliveries_for_plan_locked(sale_plan_id: int) -> list[dict]:
         return sale_deliveries_repo.list_deliveries_for_plan(sale_plan_id, DB_PATH)
 
 
+def list_deliveries_locked(farm_ids: list[int] | None = None) -> list[dict]:
+    with db_lock:
+        return sale_deliveries_repo.list_deliveries(DB_PATH, farm_ids=farm_ids)
+
+
 def delete_delivery_locked(delivery_id: int) -> tuple[bool, str | None]:
     with db_lock:
         return sale_deliveries_repo.delete_delivery(delivery_id, DB_PATH)
@@ -554,3 +601,28 @@ def count_deliveries_for_pig_type_locked(pig_type_id: int) -> int:
 def lock_delivery_locked(delivery_id: int, ip: str | None, username: str | None) -> bool:
     with db_lock:
         return weighing_repo.lock_record("sale_deliveries", delivery_id, DB_PATH, ip, username)
+
+
+# ---------------------------------------------------------------------------
+# Hộp thư Thông báo (STEP 10.5 / Phase 5, brief nghiệp vụ)
+# ---------------------------------------------------------------------------
+
+
+def list_notifications_for_user_locked(username: str, limit: int = 50) -> list[dict]:
+    with db_lock:
+        return notifications_repo.list_for_user(username, DB_PATH, limit=limit)
+
+
+def count_unread_notifications_locked(username: str) -> int:
+    with db_lock:
+        return notifications_repo.count_unread(username, DB_PATH)
+
+
+def mark_notification_read_locked(notification_id: int, username: str) -> bool:
+    with db_lock:
+        return notifications_repo.mark_read(notification_id, username, DB_PATH)
+
+
+def mark_all_notifications_read_locked(username: str) -> None:
+    with db_lock:
+        notifications_repo.mark_all_read(username, DB_PATH)

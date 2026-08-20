@@ -3,6 +3,23 @@
 {% block brand_title %}🔑 Phân quyền{% endblock %}
 {% block brand_sub %}Tuỳ biến quyền theo vai trò — chỉ admin xem được trang này{% endblock %}
 
+{% block breadcrumb %}
+<nav class="breadcrumb">
+  <a href="{{ url_for('dashboard.index') }}">Tổng quan</a>
+  <span class="breadcrumb-sep">/</span>
+  <span class="breadcrumb-current">Phân quyền</span>
+</nav>
+{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div class="page-header-titles">
+    <h1 class="page-header-title">🔑 Phân quyền</h1>
+    <p class="page-header-desc">Tuỳ biến quyền theo vai trò</p>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
   <section class="card">
     <h2>Tạo vai trò mới</h2>

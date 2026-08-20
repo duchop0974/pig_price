@@ -1,5 +1,7 @@
 """Kết nối SQLite dùng chung, schema + migration nhẹ (thêm cột/bảng nếu chưa có)."""
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -436,6 +438,23 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log(at);
 -- đây — cùng lý do với idx_zones_farm_id/idx_sale_plans_plan_code: trên DB
 -- nâng cấp từ bản cũ, executescript() này chạy trước _migrate() nên các cột
 -- đó có thể chưa tồn tại lúc CREATE INDEX chạy.
+
+-- Hộp thư Thông báo (Phase 5, brief nghiệp vụ) — khác audit_log (lịch sử
+-- MỌI hành động, không ai "đọc") và Cảnh báo/Cần xử lý (tính động lúc đọc,
+-- không lưu): đây là bản ghi PERSIST, nhắm tới 1 người dùng cụ thể
+-- (recipient_username, không phải role/farm — đơn giản hoá bằng cách
+-- resolve người nhận LÚC GHI, xem core/services/notification_service.py),
+-- có trạng thái đọc/chưa đọc riêng cho từng người.
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_username TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    link_url TEXT,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_username, is_read);
 """
 
 
@@ -1096,14 +1115,57 @@ def _backfill_sale_deliveries(conn: sqlite3.Connection) -> None:
     finally:
         conn.isolation_level = old_isolation_level
 
+db_lock = threading.Lock()
+@contextmanager
+def transaction(conn: sqlite3.Connection):
+    """
+    Quản lý transaction cho một business operation.
+
+    Connection được tạo và đóng bởi caller.
+    Helper này chỉ chịu trách nhiệm BEGIN / COMMIT / ROLLBACK.
+    """
+    if conn.in_transaction:
+        # Đã có transaction bên ngoài.
+        # Không tự commit/rollback transaction của caller.
+        yield conn
+        return
+
+    try:
+        conn.execute("BEGIN")
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def run_in_transaction(db_path: Path, fn):
+    """Mở 1 connection, khoá db_lock, chạy `fn(conn)` trong 1 transaction
+    (commit/rollback tự động qua `transaction()`), đóng connection — khuôn
+    dùng chung cho mọi service layer (plan_service.py, order_service.py...)
+    cần gộp nhiều lệnh ghi (repo write + audit log) vào 1 transaction atomic
+    thay vì mỗi lệnh tự mở/đóng connection + commit riêng."""
+    with db_lock:
+        conn = get_connection(db_path)
+        try:
+            with transaction(conn):
+                return fn(conn)
+        finally:
+            conn.close()
+
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
     """Mở kết nối SQLite, tạo bảng/index nếu chưa có. WAL giúp đọc và ghi
     không chặn lẫn nhau khi nhiều tiến trình (server + script CLI) cùng
     dùng chung 1 file .db."""
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
     conn = sqlite3.connect(db_path, timeout=10)
+    conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA journal_mode=WAL;")
+
     conn.executescript(_DB_SCHEMA)
     _migrate(conn)
+
     return conn

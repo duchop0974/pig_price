@@ -63,17 +63,61 @@ function applyDsFilters(plans) {
   });
 }
 
-function dsStatusBadge(status) {
-  if (status === "needs_reconciliation") return `<span class="badge badge-warning">⚠ Cần đối soát</span>`;
-  if (status === "in_progress") return `<span class="badge">Đang trong hạn</span>`;
-  if (status === "reconciled") return `<span class="badge badge-success">✓ Đã đối soát</span>`;
-  if (status === "over_delivered") return `<span class="badge badge-danger">⚠ Vượt kế hoạch</span>`;
-  return "";
-}
-
 function dsBreakdownText(breakdown) {
   if (!breakdown || !breakdown.length) return "";
   return breakdown.map((b) => `${RECONCILE_KIND_LABELS_DS[b.kind] || b.kind} ${b.quantity}`).join(", ");
+}
+
+// Cơ cấu loại heo + trọng lượng — 2 chiều đối soát đã tính sẵn ở backend
+// (sale_plans_repo.py: delivery_mix/off_type_quantity, planned_total_weight_kg/
+// actual_total_weight_kg) nhưng trước STEP đối soát đa chiều chỉ hiện ở
+// trang Kế hoạch (plan.js:planReconcileHtml) — tái dùng đúng text/điều
+// kiện ở đây, không tính lại.
+function dsExtraBadges(p) {
+  const parts = [];
+  if (p.delivery_mix && p.delivery_mix.has_composition_variance) {
+    parts.push(`<span class="badge badge-warning">Lệch cơ cấu: ${p.off_type_quantity} con khác loại</span>`);
+  }
+  const hasWeight =
+    (p.planned_total_weight_kg !== null && p.planned_total_weight_kg !== undefined) ||
+    (p.actual_total_weight_kg !== null && p.actual_total_weight_kg !== undefined);
+  if (hasWeight) {
+    parts.push(`<span class="badge">Khối lượng: ${fmtWeight(p.actual_total_weight_kg)} / ${fmtWeight(p.planned_total_weight_kg)} kg</span>`);
+  }
+  return parts.join(" ");
+}
+
+// Đối soát đa chiều (Phase 2): Khách hàng/Giá/Phiếu cân không rút gọn về 1
+// cột được (1 kế hoạch có thể tách nhiều đơn/khách/giá) — hiện dạng bảng
+// nhỏ trong detailModal() (core/modal.js, đã load sẵn qua base.html, đúng
+// pattern plan.js/allocation.js đang dùng cho chi tiết đơn hàng).
+async function showSaleBreakdown(planId, planCode) {
+  const res = await fetch(`/api/plans/${planId}/sale-breakdown`);
+  if (!res.ok) {
+    showToast("Không tải được chi tiết bán hàng.", "error");
+    return;
+  }
+  const lines = await res.json();
+  const bodyHtml = !lines.length
+    ? `<p class="msg">Kế hoạch này chưa có dòng hàng nào.</p>`
+    : `<table class="admin-table">
+        <thead><tr><th>Đơn hàng</th><th>Khách hàng</th><th>Số lượng</th><th>Giá chốt</th><th>Giá thực tế</th><th>Phiếu cân</th></tr></thead>
+        <tbody>
+          ${lines
+            .map(
+              (l) => `<tr>
+                <td>${l.order_code}${renderBadge(l.order_status)}</td>
+                <td>${l.customer_name || "—"}</td>
+                <td>${fmtPrice(l.quantity)} con</td>
+                <td>${l.selling_price !== null ? fmtPrice(l.selling_price) + "đ" : "—"}</td>
+                <td>${l.actual_price !== null ? fmtPrice(l.actual_price) + "đ" : "—"}</td>
+                <td>${l.weighing_refs.length ? l.weighing_refs.join(", ") : "—"}</td>
+              </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>`;
+  detailModal({ title: `Chi tiết bán hàng — ${planCode}`, bodyHtml });
 }
 
 function planRowHtml(p) {
@@ -82,16 +126,20 @@ function planRowHtml(p) {
     ? `<a class="btn btn-ghost btn-sm" href="/ke-hoach?highlight=${p.id}&action=reconcile">Xử lý chênh lệch →</a>`
     : "";
   const remainingCls = p.remaining_to_reconcile < 0 ? "text-success" : p.remaining_to_reconcile > 0 ? "text-danger" : "";
+  const noteHtml = [dsBreakdownText(p.reconciliation_breakdown), dsExtraBadges(p)].filter(Boolean).join(" ");
+  const planCodeSafe = (p.plan_code || "#" + p.id).replace(/'/g, "\\'");
   return `<tr>
-    <td data-label="Mã kế hoạch">${p.plan_code || "#" + p.id}</td>
+    <td data-label="Mã kế hoạch"><button type="button" class="btn btn-ghost btn-sm" onclick="showSaleBreakdown(${p.id}, '${planCodeSafe}')">${p.plan_code || "#" + p.id}</button></td>
     <td data-label="Trại">${p.farm}${p.zone ? " · " + p.zone : ""}</td>
     <td data-label="Loại heo">${p.pig_type_name || "—"}</td>
     <td data-label="Ngày dự kiến">${fmtIsoDate(p.planned_date)}</td>
+    <td data-label="Ngày xuất thực tế">${p.last_delivered_date ? fmtIsoDate(p.last_delivered_date) : "—"}</td>
     <td data-label="Kế hoạch">${fmtPrice(p.quantity)} con</td>
-    <td data-label="Đã bán">${fmtPrice(p.actual_sold_quantity)} con</td>
-    <td data-label="Chưa xử lý" class="${remainingCls}">${fmtPrice(p.remaining_to_reconcile)} con</td>
-    <td data-label="Trạng thái">${dsStatusBadge(p.reconciliation_status)}</td>
-    <td data-label="Ghi chú">${dsBreakdownText(p.reconciliation_breakdown)}</td>
+    <td data-label="Chốt">${fmtPrice(p.allocated_quantity)} con</td>
+    <td data-label="Thực tế">${fmtPrice(p.actual_sold_quantity)} con</td>
+    <td data-label="Chênh lệch" class="${remainingCls}">${fmtPrice(p.remaining_to_reconcile)} con</td>
+    <td data-label="Trạng thái">${renderBadge(p.reconciliation_status)}</td>
+    <td data-label="Ghi chú">${noteHtml}</td>
     <td>${actionHtml}</td>
   </tr>`;
 }

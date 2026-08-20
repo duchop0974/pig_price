@@ -34,40 +34,53 @@ async function handlePigTypeListClick(e) {
 
   if (editBtn) {
     const id = editBtn.dataset.id;
-    const code = (prompt("Mã loại heo:", editBtn.dataset.code) || "").trim();
-    if (!code) return;
-    const name = (prompt("Tên hiển thị:", editBtn.dataset.name) || "").trim();
-    if (!name) return;
+    const code = await promptModal({ title: "Sửa loại heo", label: "Mã", initialValue: editBtn.dataset.code, required: true });
+    if (code === null) return;
+    const name = await promptModal({ title: "Sửa loại heo", label: "Tên hiển thị", initialValue: editBtn.dataset.name, required: true });
+    if (name === null) return;
     const res = await fetch(`/api/admin/pig-types/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code, name }),
     });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi sửa loại heo.");
+      showToast(payload.error || "Lỗi khi sửa loại heo.", "danger");
       return;
     }
+    showToast("Đã lưu loại heo.", "success");
     location.reload();
   } else if (toggleBtn) {
     const id = toggleBtn.dataset.id;
     const currentlyActive = toggleBtn.dataset.active === "1";
     const label = currentlyActive ? "khoá" : "mở lại";
-    if (!confirm(`Xác nhận ${label} loại heo này?`)) return;
-    await fetch(`/api/admin/pig-types/${id}/toggle`, {
+    const ok = await confirmModal({ title: `Xác nhận ${label} loại heo?`, confirmLabel: currentlyActive ? "Khoá" : "Mở lại" });
+    if (!ok) return;
+    const res = await fetch(`/api/admin/pig-types/${id}/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_active: !currentlyActive }),
     });
-    location.reload();
-  } else if (delBtn) {
-    if (!confirm("Xóa loại heo này? (chỉ xóa được nếu chưa có kế hoạch nào dùng)")) return;
-    const res = await fetch(`/api/admin/pig-types/${delBtn.dataset.id}`, { method: "DELETE" });
-    const payload = await res.json();
+    const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      alert(payload.error || "Lỗi khi xóa loại heo.");
+      showToast(payload.error || "Lỗi khi cập nhật trạng thái.", "danger");
       return;
     }
+    location.reload();
+  } else if (delBtn) {
+    const ok = await confirmModal({
+      title: "Xoá loại heo?",
+      body: "Chỉ xoá được nếu chưa có kế hoạch nào dùng.",
+      confirmLabel: "Xoá vĩnh viễn",
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/admin/pig-types/${delBtn.dataset.id}`, { method: "DELETE" });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast(payload.error || "Lỗi khi xóa loại heo.", "danger");
+      return;
+    }
+    showToast("Đã xoá loại heo.", "success");
     location.reload();
   }
 }

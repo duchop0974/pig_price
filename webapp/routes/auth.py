@@ -4,22 +4,18 @@ import secrets
 
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
-import data_access
 from core import audit_actions
 from core.repositories import users_repo
-from extensions import BOOTSTRAP_PASSWORD_FILE, DB_PATH, db_lock, log_access, log_audit
+from core.services import authorization_service
+from extensions import BOOTSTRAP_PASSWORD_FILE, DB_PATH, db_lock, limiter, log_access, log_audit
 
 auth_bp = Blueprint("auth", __name__)
 
 PUBLIC_ENDPOINTS = {"auth.login", "static"}
 
-# Vai trò gốc tạo sẵn khi cài mới (xem seed trong core/db.py). FARM vẫn giữ
-# làm literal vì allowed_farm_ids() bên dưới so sánh cứng với nó (scoping dữ
-# liệu theo trại — khác với gating theo route/menu, không nằm trong hệ phân
-# quyền tuỳ biến ở dưới). Danh sách role đầy đủ (kể cả role tự tạo thêm) giờ
-# là dữ liệu trong bảng roles, không còn là hằng số cố định trong code.
-FARM = "farm"
-ADMIN = "admin"
+# So sánh role "farm" (scoping dữ liệu theo trại) giờ nằm trong
+# core/services/authorization_service.py (FARM_ROLE) — allowed_farm_ids() ở
+# dưới chỉ còn là wrapper mỏng gọi service đó, không tự so sánh role nữa.
 
 
 def bootstrap_admin_if_needed() -> None:
@@ -56,10 +52,7 @@ def require_login():
 
 
 def current_user_permissions() -> set[str]:
-    user = session.get("user")
-    if not user:
-        return set()
-    return data_access.effective_permissions_locked(user["role"])
+    return authorization_service.effective_permissions(session.get("user"), DB_PATH)
 
 
 def current_user_can(permission_key: str) -> bool:
@@ -84,9 +77,7 @@ def permission_required(*permission_keys):
         @functools.wraps(view)
         def wrapped(*args, **kwargs):
             user = session.get("user")
-            allowed = bool(user) and bool(
-                data_access.effective_permissions_locked(user["role"]) & set(permission_keys)
-            )
+            allowed = authorization_service.has_any_permission(user, permission_keys, DB_PATH)
             if not allowed:
                 if request.path.startswith("/api/") or request.path.startswith("/admin/"):
                     return jsonify({"error": "Bạn không có quyền thực hiện thao tác này."}), 403
@@ -102,12 +93,11 @@ def allowed_farm_ids(user: dict) -> list[int] | None:
     """None = không giới hạn theo trại (sales/accounting/admin xem được mọi
     trại). list[int] = các trại được gán cho tài khoản vai trò 'farm' (có
     thể rỗng nếu admin chưa gán trại nào)."""
-    if user["role"] != FARM:
-        return None
-    return data_access.list_farm_ids_for_user_locked(user["id"])
+    return authorization_service.allowed_farm_ids(user, DB_PATH)
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def login():
     error = None
     if request.method == "POST":

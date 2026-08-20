@@ -168,11 +168,19 @@ def _insert_line(conn: sqlite3.Connection, order_id: int, line: dict, now: str, 
     return cur.lastrowid
 
 
-def create_order(lines: list[dict], db_path: Path, ip: str | None = None, username: str | None = None) -> int:
+def create_order(
+    lines: list[dict],
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> int:
     """Tạo 1 đơn hàng mới (status='active') kèm N dòng hàng ban đầu — 1
     transaction, đơn không bao giờ tồn tại mà chưa có dòng nào."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         order_code = _next_order_code(conn, now[:10])
         cur = conn.execute(
@@ -186,37 +194,55 @@ def create_order(lines: list[dict], db_path: Path, ip: str | None = None, userna
         order_id = cur.lastrowid
         for line in lines:
             _insert_line(conn, order_id, line, now, ip, username)
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return order_id
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def add_order_line(
-    order_id: int, line: dict, db_path: Path, ip: str | None = None, username: str | None = None
+    order_id: int,
+    line: dict,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> int:
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         line_id = _insert_line(conn, order_id, line, now, ip, username)
         conn.execute(
             "UPDATE sale_orders SET updated_at = ?, updated_ip = ?, updated_by = ? WHERE id = ?",
             (now, ip, username, order_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return line_id
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def remove_order_line(
-    order_id: int, allocation_id: int, db_path: Path, ip: str | None = None, username: str | None = None
+    order_id: int,
+    allocation_id: int,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Xoá thẳng 1 dòng khỏi đơn (chỉ dùng khi đơn còn active — kiểm ở tầng
     route). Trả False nếu dòng không thuộc đơn này (điều kiện AND order_id
     trong WHERE là lớp bảo vệ thứ 2)."""
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute("DELETE FROM sale_allocations WHERE id = ? AND order_id = ?", (allocation_id, order_id))
         if cur.rowcount > 0:
@@ -224,14 +250,21 @@ def remove_order_line(
                 "UPDATE sale_orders SET updated_at = ?, updated_ip = ?, updated_by = ? WHERE id = ?",
                 (now, ip, username, order_id),
             )
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_order_line(
-    allocation_id: int, db_path: Path, ip: str | None, username: str | None, fields: dict
+    allocation_id: int,
+    db_path: Path,
+    ip: str | None,
+    username: str | None,
+    fields: dict,
+    conn: sqlite3.Connection | None = None,
 ) -> bool:
     """Sửa số lượng/giá/ghi chú 1 dòng hàng ĐÃ TẠO — đường "ép buộc" dành
     riêng cho quyền admin-only-by-default perm.ORDER_EDIT_LINE (xem route),
@@ -250,16 +283,22 @@ def update_order_line(
     set_parts += ["updated_at = ?", "updated_ip = ?", "updated_by = ?"]
     params += [datetime.now().isoformat(timespec="seconds"), ip, username]
     params.append(allocation_id)
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         cur = conn.execute(f"UPDATE sale_allocations SET {', '.join(set_parts)} WHERE id = ?", params)
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
-def delete_order(order_id: int, db_path: Path) -> tuple[bool, str | None]:
+def delete_order(
+    order_id: int, db_path: Path, conn: sqlite3.Connection | None = None
+) -> tuple[bool, str | None]:
     """Xoá vĩnh viễn 1 đơn hàng + toàn bộ dòng hàng của nó — chặn nếu bất kỳ
     dòng nào đã có lần cân (weighing_records), sự cố (incident_reports) hoặc
     lần xuất giao thực tế (sale_deliveries) gắn vào (3 bảng tham chiếu thẳng
@@ -268,7 +307,9 @@ def delete_order(order_id: int, db_path: Path) -> tuple[bool, str | None]:
     sale_deliveries đặc biệt quan trọng: đây chính là sổ ghi audit trail
     "xuất giao thực tế" mà tính năng đối soát dựa vào — cascade-xoá sẽ phá
     huỷ đúng cái bằng chứng tính năng này tồn tại để giữ lại."""
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         line_ids = [r[0] for r in conn.execute("SELECT id FROM sale_allocations WHERE order_id = ?", (order_id,)).fetchall()]
         if line_ids:
@@ -286,10 +327,12 @@ def delete_order(order_id: int, db_path: Path) -> tuple[bool, str | None]:
                 return False, "Không thể xoá: đã có lần cân, sự cố hoặc bản ghi xuất giao gắn với dòng hàng của đơn này."
         conn.execute("DELETE FROM sale_allocations WHERE order_id = ?", (order_id,))
         cur = conn.execute("DELETE FROM sale_orders WHERE id = ?", (order_id,))
-        conn.commit()
+        if own_connection:
+            conn.commit()
         return cur.rowcount > 0, None
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def _attach_lines(conn: sqlite3.Connection, orders: list[dict]) -> None:
@@ -358,6 +401,48 @@ def list_awaiting_revenue(db_path: Path, limit: int = 5) -> dict:
         conn.close()
 
 
+def list_stale_awaiting_revenue(db_path: Path, days: int = 14, limit: int = 10) -> dict:
+    """Exception Center (STEP 10): đơn "Đã bán" nhưng ĐÃ QUÁ `days` ngày
+    vẫn chưa ghi doanh thu — khác list_awaiting_revenue() ở chỗ chỉ lấy
+    bản đã trễ hạn thật sự, không phải mọi đơn đang chờ (việc thường quy).
+    sale_orders không có cột "done_at" — suy thời điểm mark-done từ
+    audit_log (action='order.mark_done', ghi mỗi lần đơn chuyển 'done'
+    qua order_service.update_status(), xem core/audit_actions.py), lấy
+    MAX(created_at) phòng trường hợp có nhiều lần ghi (không nên xảy ra
+    nhưng an toàn hơn lấy bản mới nhất)."""
+    if not db_path.exists():
+        return {"total": 0, "items": []}
+    conn = get_connection(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        # audit_log.entity_id có TEXT affinity (cột khai báo TEXT) — SQLite tự
+        # ép giá trị INTEGER truyền vào thành chuỗi lúc lưu, nên phải CAST lại
+        # về INTEGER mới so sánh đúng với so.id (khác storage class INTEGER
+        # vs TEXT thì SQLite không tự coi là bằng nhau trong IN (...)).
+        # audit_log.at lưu ISO8601 kèm offset giờ VN (VD "...T09:38:35+07:00",
+        # xem extensions.py/audit_repo.py) — khác định dạng "YYYY-MM-DD
+        # HH:MM:SS" UTC mà datetime('now') trả về, so sánh chuỗi thô sẽ sai;
+        # bọc datetime(at) để SQLite tự quy đổi về cùng định dạng/UTC trước
+        # khi so sánh.
+        where = (
+            "WHERE so.status = 'done' AND so.paid_amount IS NULL "
+            "AND so.id IN ("
+            "  SELECT CAST(entity_id AS INTEGER) FROM audit_log"
+            "  WHERE action = 'order.mark_done' AND entity_type = 'sale_order'"
+            "  GROUP BY entity_id"
+            "  HAVING MAX(datetime(at)) <= datetime('now', ?)"
+            ")"
+        )
+        params = (f"-{days} days",)
+        total = conn.execute(f"SELECT COUNT(*) FROM sale_orders so {where}", params).fetchone()[0]
+        rows = conn.execute(
+            f"{_ORDER_SELECT_VISIBLE} {where} ORDER BY so.created_at ASC LIMIT ?", (*params, limit)
+        ).fetchall()
+        return {"total": total, "items": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
 def list_orders(db_path: Path) -> list[dict]:
     if not db_path.exists():
         return []
@@ -393,17 +478,26 @@ def list_orders_for_export(db_path: Path) -> list[dict]:
 
 
 def update_order_status(
-    order_id: int, status: str, db_path: Path, ip: str | None = None, username: str | None = None
+    order_id: int,
+    status: str,
+    db_path: Path,
+    ip: str | None = None,
+    username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE sale_orders SET status = ?, updated_at = ?, updated_ip = ?, updated_by = ? WHERE id = ?",
             (status, datetime.now().isoformat(timespec="seconds"), ip, username, order_id),
         )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def mark_order_done(
@@ -412,6 +506,7 @@ def mark_order_done(
     db_path: Path,
     ip: str | None = None,
     username: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     """Đánh dấu đơn 'Đã bán' + ghi giá/số lượng bán thực tế cho từng dòng.
     line_actuals: [{'allocation_id', 'actual_price', 'actual_quantity'}, ...]
@@ -429,7 +524,9 @@ def mark_order_done(
       lần xuất, để không cộng trùng và không xoá mất cơ cấu đã ghi.
     """
     now = datetime.now().isoformat(timespec="seconds")
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(
             "UPDATE sale_orders SET status = 'done', updated_at = ?, updated_ip = ?, updated_by = ? WHERE id = ?",
@@ -485,13 +582,20 @@ def mark_order_done(
                 """,
                 (allocation_id, allocation_id, now, ip, username, allocation_id, order_id),
             )
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_order_sale_details(
-    order_id: int, db_path: Path, ip: str | None, username: str | None, fields: dict
+    order_id: int,
+    db_path: Path,
+    ip: str | None,
+    username: str | None,
+    fields: dict,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     """fields: dict con của {'customer_id','contact_note','confirmed_sale_at',
     'delivery_time','payment_method'} — chỉ những khoá THỰC SỰ CÓ MẶT trong
@@ -512,16 +616,25 @@ def update_order_sale_details(
     set_parts += ["updated_at = ?", "updated_ip = ?", "updated_by = ?"]
     params += [datetime.now().isoformat(timespec="seconds"), ip, username]
     params.append(order_id)
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(f"UPDATE sale_orders SET {', '.join(set_parts)} WHERE id = ?", params)
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def update_order_revenue_details(
-    order_id: int, db_path: Path, ip: str | None, username: str | None, fields: dict
+    order_id: int,
+    db_path: Path,
+    ip: str | None,
+    username: str | None,
+    fields: dict,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     """fields: dict con của {'paid_amount','weighing_ref','invoice_number'} —
     cùng cách "chỉ set field có mặt" như update_order_sale_details. Khi
@@ -544,12 +657,16 @@ def update_order_revenue_details(
     set_parts += ["updated_at = ?", "updated_ip = ?", "updated_by = ?"]
     params += [now, ip, username]
     params.append(order_id)
-    conn = get_connection(db_path)
+    own_connection = conn is None
+    if own_connection:
+        conn = get_connection(db_path)
     try:
         conn.execute(f"UPDATE sale_orders SET {', '.join(set_parts)} WHERE id = ?", params)
-        conn.commit()
+        if own_connection:
+            conn.commit()
     finally:
-        conn.close()
+        if own_connection:
+            conn.close()
 
 
 def count_orders_for_customer(customer_id: int, db_path: Path) -> int:
