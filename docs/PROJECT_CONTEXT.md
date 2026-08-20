@@ -1517,6 +1517,110 @@ thái có dữ liệu (script Flask test-client trên DB tạm, seed đủ 4 tì
 huống, xác nhận cả 4 khối render đúng nội dung) + nav link "🚨 Cảnh báo"
 xuất hiện đúng vị trí, đúng quyền.
 
+### 12. Brief nghiệp vụ "Kế hoạch → Chào hàng → Chốt bán → Xuất thực tế → Đối soát → Hoàn tất", 5 phase (2026-08-20)
+
+User cung cấp lại brief gốc (`brief_ngan_gon_cai_tien_web_ban_heo.md`, không
+lưu trong repo) + ảnh dashboard mẫu, yêu cầu hệ thống xuyên suốt theo 6 giai
+đoạn trên, đối soát đa chiều (8 chiều), không sửa dữ liệu kế hoạch để che
+lệch. Đã audit kỹ (2 Explore agent) trước khi lên plan — phần lớn brief đã
+được đáp ứng qua các đợt Giai đoạn 1-9/STEP 8/STEP 10 trước đó (KPI dashboard,
+trang Đối soát riêng, nguyên tắc bất biến kế hoạch); phần thật sự còn thiếu
+chia thành 5 phase độc lập, mỗi phase test + verify + commit riêng.
+
+**Phase 1 — Đối soát: hiện đủ 3 chiều đã tính sẵn.** Trang Đối soát trước đó
+chỉ so 1/8 chiều (số lượng). `webapp/templates/doi_soat.html`/`doi_soat.js`
+thêm cột "Chốt" (`allocated_quantity`) và "Ngày xuất thực tế"
+(`last_delivered_date`) — đổi nhãn "Đã bán"→"Thực tế"/"Chưa xử lý"→"Chênh
+lệch" khớp thuật ngữ brief ("Kế hoạch | Chốt | Thực tế | Chênh lệch") — cùng
+badge "Lệch cơ cấu"/"Khối lượng" trong cột Ghi chú, tái dùng đúng field đã
+tính sẵn ở `sale_plans_repo.py` (`delivery_mix`/`off_type_quantity`/
+`planned_total_weight_kg`/`actual_total_weight_kg`) trước đó chỉ hiện ở trang
+Kế hoạch. Thuần frontend, không đổi API/repo.
+
+**Phase 2 — Đối soát: breakdown Khách hàng/Giá/Phiếu cân theo kế hoạch.** 3
+chiều còn lại brief yêu cầu không rút gọn về 1 cột được (1 kế hoạch trại có
+thể tách nhiều đơn/khách/giá) — `sale_plans_repo.get_plan_sale_breakdown()`
+(JOIN `sale_allocations→sale_orders→customers` + `sale_deliveries.
+weighing_ref`) trả về danh sách, route mới `GET /api/plans/<id>/
+sale-breakdown`, UI: bấm mã kế hoạch ở trang Đối soát mở `detailModal()`
+hiện bảng đơn hàng/khách hàng/giá chốt/giá thực tế/phiếu cân.
+
+**Phase 3 — Dashboard: filter trại/khách hàng/loại heo.** Giai đoạn 7 trước
+đây chủ động bỏ qua filter bar của ảnh mẫu ("cần backend query-param
+changes") — brief lần này xác nhận lại cần. `dashboard_summary()`/
+`daily_reconciliation_series()`/`pig_type_composition()` nhận thêm
+`customer_id`/`pig_type_id` tuỳ chọn: `customer_id` chỉ áp lên
+allocated/actual (qua `so.customer_id`, `sale_plans` không có khái niệm
+khách hàng); `pig_type_id` áp `sp.pig_type_id` cho planned/allocated (loại
+ĐĂNG KÝ) nhưng `sd.pig_type_id` cho actual (loại THỰC TẾ, có thể khác —
+đúng khái niệm lệch cơ cấu). `/api/dashboard/summary` nhận thêm `farm_id`
+(thu hẹp trong `allowed_farm_ids`, không cho chọn ngoài quyền). UI: 3
+`<select>` mới lấy option từ API GET có sẵn (`/api/farms`/`/api/customers`/
+`/api/pig-types`), không tạo route mới.
+
+**Phase 4 — Tách "Kế hoạch bán" thành Chào hàng + Chốt bán (rủi ro IA lớn
+nhất).** Trang `/ke-hoach-ban` cũ gộp chọn nguồn+giỏ nháp+toàn bộ quản lý
+đơn hàng — brief muốn mỗi giai đoạn 1 trang riêng (user chọn phương án này
+qua AskUserQuestion, chấp nhận rủi ro IA lớn hơn thay vì giữ nguyên 1 trang
++ stepper). "Xuất thực tế" (`/xuat-giao`) và "Đối soát" đã tách sẵn từ
+trước, chỉ đổi nhãn "Xuất giao"→"Xuất thực tế". Tách 2 trang mới:
+- **`/chao-hang`** (`chao_hang.js`, kế thừa phần chọn nguồn/giỏ nháp/tạo đơn
+  của `allocation.js` cũ): tạo đơn xong hiện link "Sang Chốt bán để xử lý
+  tiếp →".
+- **`/chot-ban`** (`chot_ban.js`, kế thừa phần quản lý đơn hàng của
+  `allocation.js` cũ): danh sách + toàn bộ modal (chốt bán/đã bán/doanh
+  thu/xuất giao/heo loại-hủy/khoá/xoá). Nút "➕ Thêm dòng" điều hướng sang
+  `/chao-hang?target_order=<id>&target_order_code=<code>` (thay vì cuộn tới
+  form cùng trang) — `chao_hang.js` đọc query param lúc tải trang để
+  pre-fill đúng ngữ cảnh "đang thêm vào đơn X".
+
+`/ke-hoach-ban` (route cũ) → redirect 303 sang `/chot-ban`, giữ bookmark cũ.
+`allocations.html`/`allocation.js` xoá. Cập nhật mọi nơi trỏ tới
+`plans.allocations_page` (đã audit ra danh sách cụ thể): `PROCESS_STEPS`
+(bước 4→Chào hàng, bước 5-7→Chốt bán), 3 khối link "Cần xử lý"
+(`dashboard.py`), nav `base.html` (2 link mới đúng permission), process-nav
+breadcrumb (3 bước→5 bước: Kế hoạch trại/Chào hàng/Chốt bán/Xuất thực
+tế/Đối soát).
+
+**Phase 5 — Hộp thư Thông báo (bảng mới, đọc/chưa đọc).** Ảnh mẫu có
+"Thông báo" tách khỏi "Cảnh báo" — user xác nhận làm thật (không có trong
+brief text, chỉ có trong ảnh, nhưng user chọn làm). Bảng mới
+`notifications` (`recipient_username`, `title`, `body`, `link_url`,
+`is_read`, `created_at`) — bản ghi PERSIST nhắm 1 người cụ thể, khác
+audit_log (lịch sử mọi hành động, không ai đọc) và Cảnh báo/Cần xử lý
+(tính động, không lưu). `core/services/notification_service.py::notify()`
+resolve người nhận = mọi user active có quyền `permission_key` (lọc thêm
+farm nếu vai trò `farm`).
+
+**Bug thật gặp lúc build, đáng nhớ**: `notify()` bản đầu gọi các hàm repo
+đọc kiểu `users_repo.list_users()`/`roles_repo.effective_permissions()`
+(mỗi hàm tự mở connection riêng qua `get_connection()`, mà hàm này LUÔN
+chạy `executescript(_DB_SCHEMA)` — một thao tác kiểu ghi schema) — trong
+khi `notify()` luôn được gọi từ BÊN TRONG 1 transaction ghi CHƯA COMMIT
+(`run_in_transaction`'s `_do(conn)`). Mở connection mới rồi chạy thao tác
+kiểu ghi trong lúc connection kia đang giữ transaction ghi mở gây tranh
+khoá dây chuyền — pytest treo hơn 120 giây (mỗi user trong vòng lặp
+`notify()` phải chờ hết `busy_timeout=10s` của `get_connection()`). Fix:
+viết lại `notify()` đọc thẳng qua `conn` được truyền vào (bắt buộc, không
+còn optional) bằng SQL trực tiếp, không qua tầng repo tự mở connection.
+**Bài học chung cho code sau này**: bất kỳ hàm nào chạy bên trong
+`_do(conn)` của `run_in_transaction` phải dùng lại đúng `conn` đó cho MỌI
+thao tác DB (kể cả đọc), không được gọi hàm repo tự mở connection riêng.
+
+5 điểm gắn (chọn giá trị nhất, không instrument toàn bộ): kế hoạch mới (→
+`PLAN_REVIEW`), duyệt/từ chối kế hoạch (→ báo ngược người tạo qua
+`created_by`), đơn đã bán (→ `PLAN_REVENUE_DETAILS`), xuất giao thiếu cân
+(→ `DELIVERY_CREATE`, đúng tiêu chí Exception Center mục 3), role `farm`
+vượt quyền mặc định (→ `ADMIN_PERMISSIONS_MANAGE`, đúng tiêu chí Exception
+Center mục 4). Route `GET /thong-bao` + 4 API (list/unread-count/
+mark-read/mark-all-read). UI tái dùng `.timeline` có sẵn (khuôn
+`admin_audit.html`) + badge số chưa đọc trên nav
+(`core/notifications-badge.js`, load 1 lần lúc trang tải, KHÔNG polling —
+v1 cố ý đơn giản).
+
+**Verify tổng**: mỗi phase test + Browser pane thật riêng (không dồn cuối);
+34/34 pytest PASS sau cả 5 phase; DB thật sạch sau mỗi lần verify.
+
 ---
 
 ## III. Đề xuất thiết kế mở rộng
