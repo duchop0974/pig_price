@@ -295,18 +295,45 @@ def canh_bao():
 def api_dashboard_summary():
     """5 KPI + biểu đồ xu hướng + biểu đồ cơ cấu cho trang Tổng quan — 1
     request duy nhất, không gate permission riêng (trang Tổng quan hiện
-    không gate), chỉ lọc farm_ids như route "/" đang làm."""
+    không gate), chỉ lọc farm_ids như route "/" đang làm.
+
+    Phase 3 (filter theo brief): thêm farm_id/customer_id/pig_type_id tuỳ
+    chọn. farm_id chỉ thu hẹp trong PHẠM VI đã được phép (allowed_farm_ids)
+    — không cho user chọn trại ngoài quyền của mình dù truyền query param
+    thủ công."""
     try:
         days = int(request.args.get("days", 30))
     except (TypeError, ValueError):
         days = 30
     days = max(1, min(days, 365))
     farm_ids = allowed_farm_ids(session["user"])
+    farm_id_raw = request.args.get("farm_id")
+    if farm_id_raw:
+        try:
+            selected_farm_id = int(farm_id_raw)
+        except ValueError:
+            selected_farm_id = None
+        if selected_farm_id is not None and (farm_ids is None or selected_farm_id in farm_ids):
+            farm_ids = [selected_farm_id]
+    customer_id = None
+    if request.args.get("customer_id"):
+        try:
+            customer_id = int(request.args["customer_id"])
+        except ValueError:
+            customer_id = None
+    pig_type_id = None
+    if request.args.get("pig_type_id"):
+        try:
+            pig_type_id = int(request.args["pig_type_id"])
+        except ValueError:
+            pig_type_id = None
     return jsonify(
         {
-            "kpi": dashboard_summary_locked(farm_ids=farm_ids, days=days),
-            "daily": daily_reconciliation_series_locked(farm_ids=farm_ids, days=days),
-            "composition": pig_type_composition_locked(farm_ids=farm_ids, days=days),
+            "kpi": dashboard_summary_locked(farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id),
+            "daily": daily_reconciliation_series_locked(
+                farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id
+            ),
+            "composition": pig_type_composition_locked(farm_ids=farm_ids, days=days, customer_id=customer_id),
         }
     )
 

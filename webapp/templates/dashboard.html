@@ -15,6 +15,11 @@
           <option value="30" selected>30 ngày qua</option>
           <option value="90">90 ngày qua</option>
         </select>
+        <select id="dashboard-filter-farm"><option value="">Tất cả trại</option></select>
+        {% if current_user_can('customers.view') %}
+        <select id="dashboard-filter-customer"><option value="">Tất cả khách hàng</option></select>
+        {% endif %}
+        <select id="dashboard-filter-pig-type"><option value="">Tất cả loại heo</option></select>
       </div>
     </div>
     <p class="dashboard-intro">Kèm kế hoạch đã lên lịch gần đây (tới 7 ngày tới) để không bỏ sót lô hàng sắp xuất.</p>

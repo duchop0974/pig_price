@@ -273,19 +273,29 @@ def count_plans_for_pig_type_locked(pig_type_id: int) -> int:
         return sale_plans_repo.count_plans_for_pig_type(pig_type_id, DB_PATH)
 
 
-def dashboard_summary_locked(farm_ids: list[int] | None = None, days: int = 30) -> dict:
+def dashboard_summary_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None, pig_type_id: int | None = None
+) -> dict:
     with db_lock:
-        return sale_plans_repo.dashboard_summary(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.dashboard_summary(
+            DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id
+        )
 
 
-def daily_reconciliation_series_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def daily_reconciliation_series_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None, pig_type_id: int | None = None
+) -> list[dict]:
     with db_lock:
-        return sale_plans_repo.daily_reconciliation_series(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.daily_reconciliation_series(
+            DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id, pig_type_id=pig_type_id
+        )
 
 
-def pig_type_composition_locked(farm_ids: list[int] | None = None, days: int = 30) -> list[dict]:
+def pig_type_composition_locked(
+    farm_ids: list[int] | None = None, days: int = 30, customer_id: int | None = None
+) -> list[dict]:
     with db_lock:
-        return sale_plans_repo.pig_type_composition(DB_PATH, farm_ids=farm_ids, days=days)
+        return sale_plans_repo.pig_type_composition(DB_PATH, farm_ids=farm_ids, days=days, customer_id=customer_id)
 
 
 def list_needs_reconciliation_locked(farm_ids: list[int] | None = None, limit: int = 5) -> dict:

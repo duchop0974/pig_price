@@ -213,8 +213,54 @@ function renderCompositionChart(composition) {
   });
 }
 
-async function loadDashboardSummary(days) {
-  const res = await fetch(`/api/dashboard/summary?days=${encodeURIComponent(days)}`);
+// Filter trại/khách hàng/loại heo (Phase 3, brief nghiệp vụ) — option lấy
+// từ 3 API GET đã có sẵn (/api/farms, /api/customers, /api/pig-types),
+// không tạo route mới. /api/customers có thể 403 (gate customers.view) —
+// select đó chỉ render khi Jinja current_user_can() đúng, nhưng fetch vẫn
+// bọc try/catch phòng trường hợp quyền đổi giữa lúc render/gọi API.
+async function loadDashboardFilterOptions() {
+  const farmSelect = el("dashboard-filter-farm");
+  const customerSelect = el("dashboard-filter-customer");
+  const typeSelect = el("dashboard-filter-pig-type");
+  if (farmSelect) {
+    const farms = await (await fetch("/api/farms")).json();
+    farmSelect.innerHTML =
+      `<option value="">Tất cả trại</option>` + farms.map((f) => `<option value="${f.id}">${f.code}</option>`).join("");
+  }
+  if (customerSelect) {
+    try {
+      const customers = await (await fetch("/api/customers?active_only=true")).json();
+      customerSelect.innerHTML =
+        `<option value="">Tất cả khách hàng</option>` +
+        customers.map((c) => `<option value="${c.id}">${c.name}</option>`).join("");
+    } catch (e) {
+      /* không có quyền xem khách hàng — giữ nguyên chỉ "Tất cả khách hàng" */
+    }
+  }
+  if (typeSelect) {
+    const types = await (await fetch("/api/pig-types")).json();
+    typeSelect.innerHTML =
+      `<option value="">Tất cả loại heo</option>` + types.map((t) => `<option value="${t.id}">${t.name}</option>`).join("");
+  }
+}
+
+function dashboardFilterParams() {
+  const params = new URLSearchParams();
+  params.set("days", el("dashboard-days").value);
+  if (el("dashboard-filter-farm") && el("dashboard-filter-farm").value) {
+    params.set("farm_id", el("dashboard-filter-farm").value);
+  }
+  if (el("dashboard-filter-customer") && el("dashboard-filter-customer").value) {
+    params.set("customer_id", el("dashboard-filter-customer").value);
+  }
+  if (el("dashboard-filter-pig-type") && el("dashboard-filter-pig-type").value) {
+    params.set("pig_type_id", el("dashboard-filter-pig-type").value);
+  }
+  return params;
+}
+
+async function loadDashboardSummary() {
+  const res = await fetch(`/api/dashboard/summary?${dashboardFilterParams().toString()}`);
   if (!res.ok) return;
   const data = await res.json();
   renderKpis(data.kpi);
@@ -224,6 +270,8 @@ async function loadDashboardSummary(days) {
 }
 
 if (el("dashboard-days")) {
-  el("dashboard-days").addEventListener("change", (e) => loadDashboardSummary(e.target.value));
-  loadDashboardSummary(el("dashboard-days").value);
+  ["dashboard-days", "dashboard-filter-farm", "dashboard-filter-customer", "dashboard-filter-pig-type"].forEach((id) => {
+    if (el(id)) el(id).addEventListener("change", () => loadDashboardSummary());
+  });
+  loadDashboardFilterOptions().then(() => loadDashboardSummary());
 }
